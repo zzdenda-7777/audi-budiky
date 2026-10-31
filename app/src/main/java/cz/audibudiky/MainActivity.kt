@@ -518,7 +518,14 @@ class MainActivity : Activity() {
         Thread({ session(port, conn) }, "kw1281").start()
     }
 
-    private fun readCluster(port: UsbSerialPort, rx: LinkedBlockingDeque<Int>, faults: Boolean) {
+    /** The USB cable as a K-line for the protocol. */
+    private class UsbKLine(private val port: UsbSerialPort) : KLine {
+        override fun write(b: Int) { port.write(byteArrayOf(b.toByte()), 200) }
+        override fun setBreak(on: Boolean) { port.setBreak(on) }
+        override fun setBaud(baud: Int) { port.setParameters(baud, 8, UsbSerialPort.STOPBITS_1, UsbSerialPort.PARITY_NONE) }
+    }
+
+    private fun readCluster(port: KLine, rx: LinkedBlockingDeque<Int>, faults: Boolean) {
         status(if (faults) "Čtu chyby přístrojů…" else "Čtu přístrojový panel…", if (faults) "faults" else "cluster")
         val bauds = if (clusterBaud != 0) listOf(clusterBaud) + listOf(10400, 9600).filter { it != clusterBaud }
                     else listOf(10400, 9600)
@@ -567,14 +574,15 @@ class MainActivity : Activity() {
             })
             io.start()
             trace("kabel $cableInfo otevřen")
+            val line = UsbKLine(port)
 
             var clusterDone = !clusterOnConnect
             var failures = 0
             while (running) {
-                if (faultsReq == 0x17) { faultsReq = 0; readCluster(port, rx, faults = true); continue }
-                if (clusterNow || !clusterDone) { clusterNow = false; clusterDone = true; readCluster(port, rx, faults = false); continue }
+                if (faultsReq == 0x17) { faultsReq = 0; readCluster(line, rx, faults = true); continue }
+                if (clusterNow || !clusterDone) { clusterNow = false; clusterDone = true; readCluster(line, rx, faults = false); continue }
 
-                val k = Kw1281(port, rx) { trace(it) }
+                val k = Kw1281(line, rx) { trace(it) }
                 var live = false
                 try {
                     status(if (failures == 0) "Připojuji motor…" else "Připojuji motor znovu…", if (failures == 0) "connecting" else "retry")

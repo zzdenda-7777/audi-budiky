@@ -39,9 +39,14 @@ android {
     kotlinOptions {
         jvmTarget = "17"
     }
+    testOptions {
+        unitTests.isReturnDefaultValues = true
+        unitTests.all { it.testLogging { events("passed", "failed"); showStandardStreams = true } }
+    }
 }
 
 dependencies {
     implementation("com.github.mik3y:usb-serial-for-android:3.8.1")
     implementation("androidx.core:core:1.13.1")
+    testImplementation("junit:junit:4.13.2")
 }

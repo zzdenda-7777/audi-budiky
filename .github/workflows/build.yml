@@ -23,6 +23,13 @@ jobs:
         with:
           gradle-version: '8.7'
 
+      - name: Protocol tests on the simulated car
+        id: tests
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          gradle testDebugUnitTest --no-daemon 2>&1 | tee test.log
+
       - name: Build debug APK
         id: build
         run: |
@@ -34,6 +41,8 @@ jobs:
         run: |
           mkdir -p out
           cp build.log out/ || true
+          grep -E "^(OK|FAIL) |TESTY:" test.log > out/TESTS.txt 2>/dev/null || echo "testy neběžely" > out/TESTS.txt
+          cp test.log out/ || true
           if [ -f app/build/outputs/apk/debug/app-debug.apk ]; then
             cp app/build/outputs/apk/debug/app-debug.apk out/AudiBudiky.apk
             echo "OK build ${GITHUB_RUN_NUMBER} ${GITHUB_SHA}" > out/STATUS.txt

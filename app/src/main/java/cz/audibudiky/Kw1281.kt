@@ -1,7 +1,5 @@
 package cz.audibudiky
 
-import android.os.SystemClock
-import com.hoho.android.usbserial.driver.UsbSerialPort
 import java.io.IOException
 import java.util.concurrent.LinkedBlockingDeque
 import java.util.concurrent.TimeUnit
@@ -16,6 +14,19 @@ class Field(
 )
 
 class Block(val counter: Int, val title: Int, val data: IntArray)
+
+/** The K-line as seen by the protocol: the USB cable in the app, a simulated car in tests. */
+interface KLine {
+    fun write(b: Int)
+    fun setBreak(on: Boolean)
+    fun setBaud(baud: Int)
+}
+
+/** Time source; replaceable so the protocol can be tested without Android. */
+object Clock {
+    @Volatile var now: () -> Long = { System.nanoTime() / 1_000_000 }
+    @Volatile var sleep: (Long) -> Unit = { ms -> if (ms > 0) Thread.sleep(ms) }
+}
 
 /** The unit answered, but at a different baud rate. */
 class BaudMismatch(val suggested: Int, msg: String) : IOException(msg)
@@ -33,7 +44,7 @@ class NoAnswer(msg: String) : IOException(msg)
  * [trace] receives a step-by-step description that is only shown to the user when something fails.
  */
 class Kw1281(
-    private val port: UsbSerialPort,
+    private val port: KLine,
     /** Bytes from the cable, filled by a SerialInputOutputManager (no data loss, unlike short read timeouts). */
     private val rx: LinkedBlockingDeque<Int>,
     private val trace: (String) -> Unit
@@ -57,14 +68,14 @@ class Kw1281(
         var guard = 0
         do {
             rx.clear()
-            SystemClock.sleep(40)
+            Clock.sleep(40)
         } while (rx.isNotEmpty() && guard++ < 50)
         rx.clear()
     }
 
     private fun writeByte(b: Int) {
         val v = b and 0xFF
-        port.write(byteArrayOf(v.toByte()), 200)
+        port.write(v)
         if (echo == false) return
         try {
             val e = readByte(if (echo == null) 300 else 600)
@@ -96,12 +107,12 @@ class Kw1281(
         bits.add(false) // start bit
         for (i in 0..7) bits.add(((v shr i) and 1) == 1)
         bits.add(true) // stop bit
-        var t = SystemClock.elapsedRealtime()
+        var t = Clock.now()
         for (high in bits) {
             port.setBreak(!high)
             t += 200
-            val wait = t - SystemClock.elapsedRealtime()
-            if (wait > 0) SystemClock.sleep(wait)
+            val wait = t - Clock.now()
+            if (wait > 0) Clock.sleep(wait)
         }
     }
 
@@ -110,23 +121,23 @@ class Kw1281(
         echo = null
         counter = 0
         cur.setLength(0)
-        port.setParameters(baud, 8, UsbSerialPort.STOPBITS_1, UsbSerialPort.PARITY_NONE)
+        port.setBaud(baud)
         drain()
         port.setBreak(false)
-        SystemClock.sleep(600)
+        Clock.sleep(600)
         drain()
 
         trace("→ probouzím adresu ${hex(address)} (5 Bd), linka $baud Bd")
-        val t0 = SystemClock.elapsedRealtime()
+        val t0 = Clock.now()
         fiveBaud(address)
 
-        var deadline = SystemClock.elapsedRealtime() + 2500
+        var deadline = Clock.now() + 2500
         var gotSync = false
         var curBaud = baud
         var switched = false
         var garbage = 0
         val ignored = StringBuilder()
-        while (SystemClock.elapsedRealtime() < deadline) {
+        while (Clock.now() < deadline) {
             val b = try { readByte(300) } catch (e: IOException) { continue }
             if (b == 0x55) { gotSync = true; break }
             if (ignored.length < 120) ignored.append(hex(b)).append(' ')
@@ -135,10 +146,10 @@ class Kw1281(
             if (!switched && curBaud == 10400 && (b == 0xB5 || b == 0x95)) {
                 curBaud = 9600
                 switched = true
-                port.setParameters(curBaud, 8, UsbSerialPort.STOPBITS_1, UsbSerialPort.PARITY_NONE)
+                port.setBaud(curBaud)
                 rx.clear()
                 trace("jednotka mluví 9600 Bd, přepínám")
-                deadline = SystemClock.elapsedRealtime() + 2500
+                deadline = Clock.now() + 2500
             }
         }
         if (ignored.isNotEmpty()) trace("← místo synchronizace: ${ignored.toString().trim()}")
@@ -152,8 +163,8 @@ class Kw1281(
 
         val kb1 = readByte(500)
         val kb2 = readByte(500)
-        trace("← synchronizace OK za ${SystemClock.elapsedRealtime() - t0} ms, klíčová slova ${hex(kb1)} ${hex(kb2)}, $curBaud Bd")
-        SystemClock.sleep(30)
+        trace("← synchronizace OK za ${Clock.now() - t0} ms, klíčová slova ${hex(kb1)} ${hex(kb2)}, $curBaud Bd")
+        Clock.sleep(30)
         writeByte(kb2 xor 0xFF)
 
         val sb = StringBuilder()
@@ -203,7 +214,7 @@ class Kw1281(
         bytes[2] = title
         for (i in data.indices) bytes[3 + i] = data[i]
         bytes[bytes.size - 1] = 0x03
-        SystemClock.sleep(2)
+        Clock.sleep(2)
         for (i in 0 until bytes.size - 1) {
             writeByte(bytes[i])
             val c = readByte(1500)
