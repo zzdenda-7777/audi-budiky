@@ -316,7 +316,11 @@ input{font-family:var(--mono);width:12em}
         2:['Stav km','Palivo v nádrži','Plovák paliva','Venkovní teplota'],
         3:['Teplota vody','Hladina oleje','Teplota oleje','–']}
   };
-  const fname = (e,g,i) => (NAMES[e] && NAMES[e][g] && NAMES[e][g][i]) || ('Pole '+(i+1));
+  const CLU_T = {7:'Rychlost',1:'Otáčky',37:'Tlak oleje',36:'Stav km',19:'Palivo v nádrži',12:'Plovák paliva',44:'Čas'};
+  const fname = (e,g,i,x) => {
+    if(e===CLU && x){ if(x.t===5) return g===2?'Venkovní teplota':(i===0?'Teplota vody':'Teplota oleje'); if(CLU_T[x.t]) return CLU_T[x.t]; }
+    return (NAMES[e] && NAMES[e][g] && NAMES[e][g][i]) || ('Pole '+(i+1)); };
+  let CYL = 6; // updated from the engine ident (R4, R5, V6 …)
 
   /* ---------------- live metrics ---------------- */
   // M[key] = {v, t(ms), src}
@@ -354,7 +358,7 @@ input{font-family:var(--mono);width:12em}
       if(g===1){ const sp=firstType(f,7); if(sp!=null) setM('spdClu',sp,src); }
       if(g===2){ const km=firstType(f,36); if(km!=null) setM('odo',km,src);
                  const fl=firstType(f,19); if(fl!=null) setM('fuelL',fl,src);
-                 const ot=at(f,3,[5]); if(ot!=null) setM('outT',ot,src); }
+                 const ot=firstType(f,5); if(ot!=null) setM('outT',ot,src); }
       if(g===3){ // oil temp: 3rd field if it is a temperature, otherwise any plausible temp other than the first
         let oil = at(f,2,[5]);
         if(oil==null){ const temps=f.map((x,i)=>({x,i})).filter(o=>o.x.t===5 && o.i>0 && o.x.v>-40 && o.x.v<170); if(temps.length) oil=temps[0].x.v; }
@@ -368,9 +372,9 @@ input{font-family:var(--mono);width:12em}
   const boostRel = () => { const a=fresh('boostAbs',3000); return a==null?null:(a-S.base)/1000; };
   const boostSpecRel = () => { const a=fresh('boostSpecAbs',3000); return a==null?null:(a-S.base)/1000; };
   function afr(){ const iq=fresh('iq',3000), maf=fresh('maf',3000); if(iq==null||maf==null||iq<3) return null; return maf/iq; }
-  function lph(){ const iq=fresh('iq',4000), rpm=fresh('rpm',3000); if(iq==null||rpm==null) return null; return Math.max(0, iq*rpm*180/1e6/0.835); }
+  function lph(){ const iq=fresh('iq',4000), rpm=fresh('rpm',3000); if(iq==null||rpm==null) return null; return Math.max(0, iq*rpm*CYL*30/1e6/0.835); }
   function speed(){ if(S.gpsV!=null && now()-S.gpsT<3000) return S.gpsV; const e=fresh('spdEng',4000); if(e!=null) return e; return null; }
-  function torque(){ const iq=fresh('iq',4000); return iq==null?null:Math.max(0, iq*7.35); }
+  function torque(){ const iq=fresh('iq',4000); return iq==null?null:Math.max(0, iq*CYL*1.226); }
   function power(){ const t=torque(), rpm=fresh('rpm',3000); return (t==null||rpm==null)?null:t*rpm/9549; }
 
   /* ---------------- tiles ---------------- */
@@ -602,7 +606,7 @@ input{font-family:var(--mono);width:12em}
       return '<div class="r"><span><b style="font-size:17px">#'+(idx+1)+'</b> <span class="note" style="margin:0">'+pad3(+k.split('/')[0])+'/'+k.split('/')[1]+'</span></span><div class="bar"><i class="'+cls+'" style="'+style+'"></i></div><b>'+(v>0?'+':'')+v.toFixed(2)+'</b></div>'; }).join('');
   }
   $('btnSmooth').onclick=()=>{
-    if(!smoothOn){ smoothOn=true; savedPlan=currentPlan; A&&A.setPlan('13,14'); A&&A.setClusterPeriod(0); $('btnSmooth').textContent='Ukončit test'; $('btnSmooth').classList.add('primary'); }
+    if(!smoothOn){ smoothOn=true; savedPlan=currentPlan; A&&A.setPlan(CYL<=4?'13':'13,14'); A&&A.setClusterPeriod(0); $('btnSmooth').textContent='Ukončit test'; $('btnSmooth').classList.add('primary'); }
     else { smoothOn=false; applyPlan(savedPlan||$('mode').value); applyCluster(); $('btnSmooth').textContent='Spustit test'; $('btnSmooth').classList.remove('primary'); }
   };
 
@@ -612,7 +616,7 @@ input{font-family:var(--mono);width:12em}
     const ks=Object.keys(groups).sort((a,b)=>{ const [ea,ga]=a.split('-').map(Number),[eb,gb]=b.split('-').map(Number); return ea-eb||ga-gb; });
     $('groups').innerHTML = ks.map(k=>{ const [e,g]=k.split('-').map(Number), G=groups[k], age=((Date.now()-G.t)/1000).toFixed(0);
       return '<div class="gsec"><h3>'+(e===CLU?'Přístroje ':'Motor ')+pad3(g)+'<span>před '+age+' s · '+G.ms+' ms</span></h3><table class="gtab">'+
-        G.f.map((x,i)=>'<tr><td>'+fname(e,g,i)+'</td><td class="v">'+(x.v!=null?(Math.abs(x.v)<10?x.v.toFixed(2):Math.abs(x.v)<100?x.v.toFixed(1):x.v.toFixed(0))+' <small>'+x.u+'</small>':x.s)+'</td><td class="r">t'+x.t+' '+x.a+'/'+x.b+'</td></tr>').join('')+'</table></div>'; }).join('')
+        G.f.map((x,i)=>'<tr><td>'+fname(e,g,i,x)+'</td><td class="v">'+(x.v!=null?(Math.abs(x.v)<10?x.v.toFixed(2):Math.abs(x.v)<100?x.v.toFixed(1):x.v.toFixed(0))+' <small>'+x.u+'</small>':x.s)+'</td><td class="r">t'+x.t+' '+x.a+'/'+x.b+'</td></tr>').join('')+'</table></div>'; }).join('')
       || '<div class="panel"><p>Zatím žádná data. Připoj se k autu.</p></div>';
   }
 
@@ -632,7 +636,8 @@ input{font-family:var(--mono);width:12em}
     const active = s.ok || /Probouz|zkouším|Čtu/.test(s.text);
     $('btnConn').textContent = active?'Odpojit':'Připojit'; $('btnConn').classList.toggle('primary',!active);
   };
-  window.onIdent = t => { $('ident').textContent = t || 'Řídicí jednotka motoru'; };
+  window.onIdent = t => { $('ident').textContent = t || 'Řídicí jednotka motoru';
+    const m=/\b[RV]\s?(\d{1,2})\b/.exec(t||''); if(m){ const c=+m[1]; if(c>=3&&c<=12) CYL=c; } };
   window.onClusterIdent = t => { $('cluNote').textContent='Panel: '+t; };
   const logLines=[];
   window.onLog = m => { logLines.push(new Date().toTimeString().slice(0,8)+'  '+m); if(logLines.length>3000) logLines.shift(); if($('v-log').classList.contains('on')) $('log').textContent=logLines.slice(-300).reverse().join('\n'); };

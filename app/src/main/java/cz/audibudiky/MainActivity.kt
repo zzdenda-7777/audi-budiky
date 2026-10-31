@@ -340,7 +340,9 @@ class MainActivity : Activity() {
                 for (g in intArrayOf(1, 2, 3)) {
                     val t0 = SystemClock.elapsedRealtime()
                     val f = k.readGroup(g)
-                    log("[přístroje] skupina %03d: %s".format(g, f.joinToString(" | ") { it.text + " [t" + it.type + "]" }))
+                    log("[přístroje] skupina %03d: %s".format(g, f.joinToString(" | ") {
+                        (if (it.value != null) String.format(Locale.US, "%.1f %s", it.value, it.unit) else it.text) +
+                            " [t${it.type} ${it.a}/${it.b}]" }))
                     recorder.write(0x17, g, f)
                     emit(0x17, g, f, SystemClock.elapsedRealtime() - t0)
                 }
@@ -463,6 +465,7 @@ class MainActivity : Activity() {
                     status("Spojeno", true)
                     js("onIdent", JSONObject.quote(name))
                     log("Motor: $name")
+                    val logged = HashSet<Int>()
                     var i = 0
                     while (running) {
                         if (clusterDue(SystemClock.elapsedRealtime(), nextCluster)) break
@@ -471,6 +474,9 @@ class MainActivity : Activity() {
                         i++
                         val t0 = SystemClock.elapsedRealtime()
                         val fields = k.readGroup(g)
+                        if (logged.add(g)) log("Motor skupina %03d: %s".format(g, fields.joinToString(" | ") {
+                            (if (it.value != null) String.format(Locale.US, "%.1f %s", it.value, it.unit) else it.text) +
+                                " [t${it.type} ${it.a}/${it.b}]" }))
                         recorder.write(address, g, fields)
                         emit(address, g, fields, SystemClock.elapsedRealtime() - t0)
                     }
