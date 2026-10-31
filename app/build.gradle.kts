@@ -43,4 +43,5 @@ android {
 
 dependencies {
     implementation("com.github.mik3y:usb-serial-for-android:3.8.1")
+    implementation("androidx.core:core:1.13.1")
 }
