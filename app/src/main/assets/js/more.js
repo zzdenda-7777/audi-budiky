@@ -160,18 +160,21 @@ const SND_LIMS = {
   volt: [['voltLow', 'Nízké napětí pod', 'V', 0.1, 11, 13.5]],
   drive: [['fuelLow', 'Nízká nafta pod', 'l', 1, 3, 25]]
 };
+/* when each sound / voice goes off (shown under every category) */
+const SND_WHEN = {
+  shift: 'Pod plynem, když otáčky dojdou na nastavenou hodnotu. Znovu až když klesnou o 400 ot.',
+  turbo: 'Nedotlak: nad 2000 ot. je tlak o víc než 0,25 bar pod požadavkem. Přetlak: o víc než 0,15 bar nad. Málo vzduchu: nad 1800 ot. pod 85 % požadavku.',
+  temp: 'Když teplota přejde nastavenou hodnotu. Přehřívání nad 113 °C hlásí vždy.',
+  volt: 'Když motor běží a napětí je pod nastavenou hodnotou déle než 5 s.',
+  smoke: 'Pod plynem, když je poměr vzduch/palivo pod 16:1 (kouří). Pod 14:1 hlásí velmi bohatou směs.',
+  warm: 'Když se studený motor poprvé zahřeje na 80 °C. A když je voda pod 60 °C a točíš přes 2500 ot.',
+  cool: 'Po ostré jízdě, když stojíš na volnoběhu a turbo vychladne. Odpočet je v proužku nahoře.',
+  timing: 'Na startu a na konci testu nebo měření zrychlení, na konci řekne výsledek.',
+  conn: 'Po připojení k motoru, při výpadku spojení a když se zase naváže.',
+  drive: 'Nafta pod nastavenou hodnotou. Náledí: venku 3 °C a méně. Dál: GPS připravena, start a uložení nahrávání, počet chyb po načtení.'
+};
 function limVal(key){ return key === 'shiftRpm' ? CFG.shiftRpm : CFG.lim[key]; }
 function limSet(key, v){ if (key === 'shiftRpm') CFG.shiftRpm = v; else CFG.lim[key] = v; }
-/* when each sound fires (for the ones without an editable value) */
-const SND_WHEN = {
-  turbo: 'při přetlaku nebo nedotlaku turba za jízdy',
-  smoke: 'když motor pod plynem kouří (bohatá směs pod 16)',
-  warm: 'když se motor zahřeje na 80 °C, a když studený točíš přes 2500',
-  cool: 'po ostré jízdě na volnoběh, až turbo vychladne',
-  timing: 'na začátku a na konci měření a testů',
-  conn: 'když se naváže nebo ztratí spojení s autem',
-  drive: 'GPS připravena, nahrávání, náledí (do 3 °C) a počet chyb po načtení'
-};
 function renderSounds(){
   let ts = 0; try { ts = A && A.ttsState ? A.ttsState() : 0; } catch (_) {}
   const ttsLine = ts === 1 ? '<span style="color:var(--ok)">✓ čeština v telefonu je</span>' : ts === 2 ? '<span style="color:var(--warn)">V telefonu chybí čeština pro předčítání – zatím se pípá.</span>' : ts === 3 ? '<span style="color:var(--warn)">Předčítání v telefonu nefunguje – zatím se pípá.</span>' : 'Hlas se načítá…';
@@ -180,8 +183,8 @@ function renderSounds(){
     '<p class="note" style="margin:8px 0 0">' + ttsLine + (CFG.voice ? '<br>Hlas mluví jako navigace – když hraje rádio přes Bluetooth, ztiší ho a promluví do reproduktorů auta.' : '') + '</p>' +
     (CFG.voice && (ts === 2 || ts === 3) ? '<button class="btn small" id="ttsSet" style="margin-top:8px">Nastavení předčítání v telefonu</button>' : '') + '</div>' +
     '<div class="card">' + SND_CATS.map(c => '<div class="switch"><span class="sw-t">' + c[1] + '<small>' + (CFG.voice ? '„' + esc(SND_SAY[c[0]]) + '“' : c[2]) + '</small></span><button class="ibtn" data-try="' + c[0] + '" aria-label="Přehrát">' + ICON.sound + '</button><button class="tog' + (CFG.snd[c[0]] ? ' on' : '') + '" data-snd="' + c[0] + '" aria-label="' + c[1] + '"></button></div>' +
-      ((CFG.snd[c[0]] && SND_LIMS[c[0]]) ? SND_LIMS[c[0]].map(l => '<div class="switch" style="padding-left:12px"><span class="sw-t" style="color:var(--muted)">' + l[1] + '</span><input class="num-in" id="lim_' + l[0] + '" type="number" inputmode="decimal" step="' + l[3] + '" value="' + fmt(limVal(l[0]), l[3] < 1 ? 1 : 0).replace(',', '.') + '"><span style="color:var(--muted);font-size:13px;width:3em">' + l[2] + '</span></div>').join('') : '') +
-      ((CFG.snd[c[0]] && SND_WHEN[c[0]]) ? '<div class="sndwhen">Spustí se ' + esc(SND_WHEN[c[0]]) + '.</div>' : '')).join('') +
+      (SND_WHEN[c[0]] ? '<div class="sndwhen"><b>Kdy:</b> ' + esc(SND_WHEN[c[0]]) + '</div>' : '') +
+      ((CFG.snd[c[0]] && SND_LIMS[c[0]]) ? SND_LIMS[c[0]].map(l => '<div class="switch" style="padding-left:12px"><span class="sw-t" style="color:var(--muted)">' + l[1] + '</span><input class="num-in" id="lim_' + l[0] + '" type="number" inputmode="decimal" step="' + l[3] + '" value="' + fmt(limVal(l[0]), l[3] < 1 ? 1 : 0).replace(',', '.') + '"><span style="color:var(--muted);font-size:13px;width:3em">' + l[2] + '</span></div>').join('') : '')).join('') +
     '</div><p class="note" style="margin-top:10px">Hlasitost řídí hlasitost médií v telefonu. U upozornění, co mají pod sebou číslo, si nastavíš, při jaké hodnotě se ozvou. Varování hlasem se opakují nejvýš jednou za 30 s, aby se v autě pořád nemluvilo.</p>';
   $('sndAll').onclick = () => { CFG.sound = !CFG.sound; saveCfg(); renderSounds(); };
   $('sndMode').querySelectorAll('button').forEach(b => { b.classList.toggle('on', (b.dataset.m === 'voice') === !!CFG.voice); b.onclick = () => { CFG.voice = b.dataset.m === 'voice'; saveCfg(); renderSounds(); }; });
