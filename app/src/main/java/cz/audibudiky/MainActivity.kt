@@ -29,6 +29,7 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.core.content.FileProvider
 import com.hoho.android.usbserial.driver.FtdiSerialDriver
+import com.hoho.android.usbserial.driver.UsbSerialDriver
 import com.hoho.android.usbserial.driver.UsbSerialPort
 import com.hoho.android.usbserial.driver.UsbSerialProber
 import org.json.JSONArray
@@ -363,13 +364,37 @@ class MainActivity : Activity() {
     private fun startConnect(auto: Boolean) {
         if (running) { if (!auto) log("Spojení už běží"); return }
         val um = getSystemService(Context.USB_SERVICE) as UsbManager
-        val drivers = UsbSerialProber.getDefaultProber().findAllDrivers(um)
+        val drivers = ArrayList(UsbSerialProber.getDefaultProber().findAllDrivers(um))
+        if (drivers.isEmpty()) {
+            // Fallback: cables with a known chip vendor but a non-standard product ID.
+            for (d in um.deviceList.values) {
+                val drv: UsbSerialDriver? = when (d.vendorId) {
+                    0x0403 -> com.hoho.android.usbserial.driver.FtdiSerialDriver(d)
+                    0x1A86 -> com.hoho.android.usbserial.driver.Ch34xSerialDriver(d)
+                    0x10C4 -> com.hoho.android.usbserial.driver.Cp21xxSerialDriver(d)
+                    0x067B -> com.hoho.android.usbserial.driver.ProlificSerialDriver(d)
+                    else -> null
+                }
+                if (drv != null) drivers.add(drv)
+            }
+        }
         if (drivers.isEmpty()) {
             if (!auto) {
                 status("Kabel nenalezen", false)
-                log("Nenašel jsem diagnostický kabel. Je zapojený přes OTG redukci?")
-                for (d in um.deviceList.values) {
-                    log("USB zařízení: VID=%04X PID=%04X %s".format(d.vendorId, d.productId, d.productName ?: ""))
+                val list = um.deviceList.values
+                if (list.isEmpty()) {
+                    log("Telefon nevidí ŽÁDNÉ USB zařízení. Chyba je v redukci, ne v kabelu ani v autě. " +
+                        "Potřebuješ redukci USB-C (samec) → USB-A (samice) s OTG, bez dalších převodníků. " +
+                        "Ověř ji flashkou nebo myší.")
+                } else {
+                    log("Telefon vidí USB zařízení, ale žádné není známý diagnostický kabel:")
+                    for (d in list) {
+                        log("USB zařízení: VID=%04X PID=%04X %s %s".format(
+                            d.vendorId, d.productId,
+                            runCatching { d.manufacturerName }.getOrNull() ?: "",
+                            runCatching { d.productName }.getOrNull() ?: ""))
+                    }
+                    log("Pošli mi tenhle řádek s VID/PID, doplním podporu.")
                 }
             } else {
                 status("Čekám na kabel", false)
