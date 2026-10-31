@@ -28,8 +28,8 @@ class Recorder(private val dir: File) {
             val name = "jizda_" + SimpleDateFormat("yyyy-MM-dd_HH-mm-ss", Locale.US).format(Date()) + ".csv"
             val f = File(dir, name)
             val w = FileWriter(f)
-            w.write("﻿") // BOM so Excel reads UTF-8 correctly
-            w.write("cas_s;skupina;pole1;jednotka1;pole2;jednotka2;pole3;jednotka3;pole4;jednotka4;surova_data\n")
+            w.write("\uFEFF") // BOM so Excel reads UTF-8 correctly
+            w.write("cas_s;jednotka_skupina;pole1;jednotka1;pole2;jednotka2;pole3;jednotka3;pole4;jednotka4;surova_data\n")
             writer = w
             file = f
             t0 = SystemClock.elapsedRealtime()
@@ -38,11 +38,11 @@ class Recorder(private val dir: File) {
         }
     }
 
-    fun write(group: Int, fields: List<Field>) {
+    fun write(ecu: Int, group: Int, fields: List<Field>) {
         synchronized(lock) {
             val w = writer ?: return
             val sb = StringBuilder()
-            sb.append(num((SystemClock.elapsedRealtime() - t0) / 1000.0, 3)).append(';').append(group)
+            sb.append(num((SystemClock.elapsedRealtime() - t0) / 1000.0, 3)).append(';').append(String.format(Locale.US, "%02X-%03d", ecu, group))
             for (i in 0 until 4) {
                 val f = fields.getOrNull(i)
                 sb.append(';')

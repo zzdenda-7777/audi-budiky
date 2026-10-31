@@ -96,9 +96,10 @@ class Kw1281(
     }
 
     /** Wakes up the control unit and returns its identification texts. */
-    fun connect(address: Int): List<String> {
+    fun connect(address: Int, baud: Int = 10400): List<String> {
         echo = null
         counter = 0
+        port.setParameters(baud, 8, UsbSerialPort.STOPBITS_1, UsbSerialPort.PARITY_NONE)
         drain()
         port.setBreak(false)
         SystemClock.sleep(600)

@@ -1,5 +1,6 @@
 package cz.audibudiky
 
+import android.Manifest
 import android.app.Activity
 import android.app.PendingIntent
 import android.content.BroadcastReceiver
@@ -7,6 +8,12 @@ import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.pm.PackageManager
+import android.location.Location
+import android.location.LocationListener
+import android.location.LocationManager
+import android.media.AudioManager
+import android.media.ToneGenerator
 import android.hardware.usb.UsbDeviceConnection
 import android.hardware.usb.UsbManager
 import android.os.Build
@@ -42,6 +49,31 @@ class MainActivity : Activity() {
     @Volatile private var address: Int = 0x01
     @Volatile private var pageReady = false
     @Volatile private var autoConnectPending = true
+    @Volatile private var clusterPeriodMs = 120_000L
+    @Volatile private var clusterNow = false
+    @Volatile private var clusterBaud = 0
+    @Volatile private var clusterFails = 0
+    private var locationManager: LocationManager? = null
+    private val tone: ToneGenerator? by lazy {
+        try { ToneGenerator(AudioManager.STREAM_MUSIC, 90) } catch (e: Exception) { null }
+    }
+
+    private val locListener = object : LocationListener {
+        override fun onLocationChanged(l: Location) {
+            js(
+                "onGps",
+                JSONObject()
+                    .put("v", if (l.hasSpeed()) l.speed * 3.6 else JSONObject.NULL)
+                    .put("acc", l.accuracy.toDouble())
+                    .put("t", l.time)
+                    .toString()
+            )
+        }
+        override fun onProviderEnabled(provider: String) { js("onGpsState", JSONObject.quote("GPS zapnuta, čekám na signál")) }
+        override fun onProviderDisabled(provider: String) { js("onGpsState", JSONObject.quote("Zapni v telefonu polohu (GPS)")) }
+        @Deprecated("old API")
+        override fun onStatusChanged(provider: String?, status: Int, extras: Bundle?) { }
+    }
 
     private val actionPermission = "cz.audibudiky.USB_PERMISSION"
     private lateinit var recorder: Recorder
@@ -100,6 +132,7 @@ class MainActivity : Activity() {
     override fun onDestroy() {
         running = false
         try { unregisterReceiver(usbReceiver) } catch (_: Exception) { }
+        try { locationManager?.removeUpdates(locListener) } catch (_: Exception) { }
         recorder.stop()
         super.onDestroy()
     }
@@ -119,6 +152,28 @@ class MainActivity : Activity() {
 
         @JavascriptInterface
         fun setAddress(a: Int) { address = a and 0x7F }
+
+        @JavascriptInterface
+        fun setClusterPeriod(seconds: Int) { clusterPeriodMs = seconds.coerceAtLeast(0) * 1000L }
+
+        @JavascriptInterface
+        fun readClusterNow() { clusterFails = 0; clusterNow = true }
+
+        @JavascriptInterface
+        fun beep(kind: Int) {
+            try {
+                tone?.startTone(
+                    if (kind >= 2) ToneGenerator.TONE_CDMA_HIGH_L else ToneGenerator.TONE_PROP_BEEP2,
+                    if (kind >= 2) 700 else 250
+                )
+            } catch (_: Exception) { }
+        }
+
+        @JavascriptInterface
+        fun gpsStart() { main.post { startGps() } }
+
+        @JavascriptInterface
+        fun gpsStop() { main.post { try { locationManager?.removeUpdates(locListener) } catch (_: Exception) { }; js("onGpsState", JSONObject.quote("GPS vypnuta")) } }
 
         @JavascriptInterface
         fun version(): String = try {
@@ -218,6 +273,84 @@ class MainActivity : Activity() {
         }
     }
 
+    private fun startGps() {
+        if (Build.VERSION.SDK_INT >= 23 &&
+            checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED
+        ) {
+            requestPermissions(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION), 7)
+            return
+        }
+        val m = getSystemService(Context.LOCATION_SERVICE) as LocationManager
+        try {
+            m.removeUpdates(locListener)
+            m.requestLocationUpdates(LocationManager.GPS_PROVIDER, 200L, 0f, locListener, Looper.getMainLooper())
+            locationManager = m
+            js(
+                "onGpsState",
+                JSONObject.quote(
+                    if (m.isProviderEnabled(LocationManager.GPS_PROVIDER)) "GPS zapnuta, čekám na signál"
+                    else "Zapni v telefonu polohu (GPS)"
+                )
+            )
+        } catch (e: Exception) {
+            js("onGpsState", JSONObject.quote("GPS nejde zapnout: ${e.message}"))
+        }
+    }
+
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == 7) {
+            if (grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) startGps()
+            else js("onGpsState", JSONObject.quote("Přístup k poloze nebyl povolen"))
+        }
+    }
+
+    private fun emit(ecu: Int, group: Int, fields: List<Field>, ms: Long) {
+        val arr = JSONArray()
+        for (f in fields) {
+            arr.put(
+                JSONObject()
+                    .put("t", f.type).put("a", f.a).put("b", f.b)
+                    .put("v", f.value ?: JSONObject.NULL)
+                    .put("u", f.unit).put("s", f.text)
+            )
+        }
+        js("onGroup", JSONObject().put("e", ecu).put("g", group).put("ms", ms).put("f", arr).toString())
+    }
+
+    private fun clusterDue(now: Long, next: Long): Boolean =
+        clusterNow || (clusterFails < 3 && clusterPeriodMs > 0 && now >= next)
+
+    private fun readCluster(port: UsbSerialPort) {
+        status("Čtu přístrojový panel…", true)
+        val bauds = if (clusterBaud != 0) listOf(clusterBaud) + listOf(10400, 9600).filter { it != clusterBaud }
+                    else listOf(10400, 9600)
+        for (b in bauds) {
+            if (!running) return
+            val k = Kw1281(port) { log("[přístroje] $it") }
+            try {
+                val ident = k.connect(0x17, b)
+                clusterBaud = b
+                clusterFails = 0
+                log("Přístrojový panel ($b Bd): ${ident.joinToString(" · ")}")
+                js("onClusterIdent", JSONObject.quote(ident.joinToString(" · ")))
+                for (g in intArrayOf(1, 2, 3)) {
+                    val t0 = SystemClock.elapsedRealtime()
+                    val f = k.readGroup(g)
+                    recorder.write(0x17, g, f)
+                    emit(0x17, g, f, SystemClock.elapsedRealtime() - t0)
+                }
+                k.end()
+                return
+            } catch (e: Exception) {
+                log("Přístroje při $b Bd: ${e.message}")
+                SystemClock.sleep(1500)
+            }
+        }
+        clusterFails++
+        if (clusterFails >= 3) log("Přístrojový panel se nedaří přečíst, automatické čtení vypínám. Zkus Načíst teď.")
+    }
+
     private fun js(fn: String, arg: String) {
         main.post { web.evaluateJavascript("window.$fn && window.$fn($arg)", null) }
     }
@@ -281,39 +414,33 @@ class MainActivity : Activity() {
             try { port.setDTR(true); port.setRTS(false) } catch (_: Exception) { }
 
             var failures = 0
+            var nextCluster = SystemClock.elapsedRealtime() + 5000
             while (running) {
+                if (clusterDue(SystemClock.elapsedRealtime(), nextCluster)) {
+                    clusterNow = false
+                    readCluster(port)
+                    nextCluster = SystemClock.elapsedRealtime() + clusterPeriodMs
+                    continue
+                }
                 val k = Kw1281(port) { log(it) }
                 try {
-                    status("Probouzím řídicí jednotku…", false)
-                    val ident = k.connect(address)
+                    status("Probouzím řídicí jednotku motoru…", false)
+                    val ident = k.connect(address, 10400)
                     failures = 0
                     val name = ident.joinToString(" · ")
                     status("Spojeno", true)
                     js("onIdent", JSONObject.quote(name))
-                    log("Jednotka: $name")
+                    log("Motor: $name")
                     var i = 0
                     while (running) {
+                        if (clusterDue(SystemClock.elapsedRealtime(), nextCluster)) break
                         val p = plan
                         val g = p[i % p.size]
                         i++
                         val t0 = SystemClock.elapsedRealtime()
                         val fields = k.readGroup(g)
-                        recorder.write(g, fields)
-                        val arr = JSONArray()
-                        for (f in fields) {
-                            arr.put(
-                                JSONObject()
-                                    .put("t", f.type).put("a", f.a).put("b", f.b)
-                                    .put("v", f.value ?: JSONObject.NULL)
-                                    .put("u", f.unit).put("s", f.text)
-                            )
-                        }
-                        js(
-                            "onGroup",
-                            JSONObject().put("g", g)
-                                .put("ms", SystemClock.elapsedRealtime() - t0)
-                                .put("f", arr).toString()
-                        )
+                        recorder.write(address, g, fields)
+                        emit(address, g, fields, SystemClock.elapsedRealtime() - t0)
                     }
                     k.end()
                 } catch (e: Exception) {
