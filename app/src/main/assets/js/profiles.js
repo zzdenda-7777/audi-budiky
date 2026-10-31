@@ -5,10 +5,54 @@
 
 const PROFILES = {
   a4v6: { id: 'a4v6', name: 'Audi A4 B6 2.5 TDI V6 (2003)', short: 'A4 2.5 TDI', engine: 'BDG · 120 kW · 310 Nm · čerpadlo VP44', cyl: 6, kw: 120, nm: 310, mass: 1620,
-    smooth: [1.5, 2.5], mafMin: [800, 750], mafNote: 'nová MAF má kolem 840 mg, pod 750 mg je na výměnu', idle: [700, 950] },
+    smooth: [1.5, 2.5], mafMin: [800, 750], mafNote: 'nová MAF má kolem 840 mg, pod 750 mg je na výměnu', idle: [700, 950],
+    boost: [1900, 2300], iqIdle: [2, 9], iqFull: [45, 58], acc0100: 9.3, pump: 'VP44' },
   a6r4: { id: 'a6r4', name: 'Audi A6 C5 1.9 TDI (1998)', short: 'A6 1.9 TDI', engine: 'AFN · 81 kW · 235 Nm · čerpadlo VE', cyl: 4, kw: 81, nm: 235, mass: 1530,
-    smooth: [2.0, 3.0], mafMin: [850, 800], mafNote: 'podle Hella 850–1050 mg při 3000 ot.', idle: [800, 1000] }
+    smooth: [2.0, 3.0], mafMin: [850, 800], mafNote: 'podle Hella 850–1050 mg při 3000 ot.', idle: [800, 1000],
+    boost: [1750, 2080], iqIdle: [2, 9], iqFull: [42, 50], acc0100: 10.9, pump: 'VE' }
 };
+/* Full limit table for the car page, grouped, most important first. Each item: [label, value]. */
+function limitRows(){
+  const p = PROFILE;
+  return [
+    ['Výkon a turbo', [
+      ['Výkon (výrobce)', p.kw + ' kW / ' + Math.round(p.kw * 1.36) + ' k'],
+      ['Moment (výrobce)', p.nm + ' Nm'],
+      ['Plnicí tlak turba', p.boost[0] + '–' + p.boost[1] + ' mbar při plném plynu'],
+      ['Turbo – odchylka', 'do ±0,10 bar (špatně > 0,20)'],
+      ['Ventil N75', 'mění se 30–90 %'],
+      ['0–100 km/h', 'orientačně ' + fmt(p.acc0100, 1) + ' s (výrobce)']
+    ]],
+    ['Vzduch a palivo', [
+      ['MAF ve 3000 ot.', 'min ' + p.mafMin[0] + ' mg (špatně < ' + p.mafMin[1] + ')'],
+      ['MAF – % požadavku', '93 % a víc (špatně < 85 %)'],
+      ['MAF na volnoběh', '300–400 mg'],
+      ['Vzduch/palivo (kouř)', '18 a víc (špatně < 16)'],
+      ['EGR při plném plynu', '0 % (zavřený)'],
+      ['Vstřik volnoběh', p.iqIdle[0] + '–' + p.iqIdle[1] + ' mg (zahřátý)'],
+      ['Vstřik plný plyn', 'kolem ' + p.iqFull[0] + '–' + p.iqFull[1] + ' mg'],
+      ['Spotřeba', 'běžně ' + (p.cyl === 6 ? '6,5–8,5' : '5,0–6,5') + ' l/100 km']
+    ]],
+    ['Motor a vstřikování', [
+      ['Volnoběh', p.idle[0] + '–' + p.idle[1] + ' ot/min, klidný'],
+      ['Klidný chod válců', '±' + fmt(p.smooth[0], 1) + ' mg (špatně > ' + fmt(p.smooth[1], 1) + ')'],
+      ['Předvstřik – odchylka', 'do ±0,5° (špatně > 1,0°)'],
+      ['Čerpadlo', p.pump + (p.cyl === 6 ? ' (nesnáší horké palivo)' : '')]
+    ]],
+    ['Teploty', [
+      ['Voda', '80–108 °C (špatně > 113)'],
+      ['Olej', 'do 120 °C (špatně > 135)'],
+      ['Palivo', 'do 70 °C (špatně > 80)'],
+      ['Nasávaný vzduch', 'do 50 °C (špatně > 70)'],
+      ['Zahřátí', 'pod 75 °C i po 20 min = termostat']
+    ]],
+    ['Elektro', [
+      ['Napětí za chodu', '13,5–14,7 V (špatně < 13,0)'],
+      ['Napětí v klidu', '12,4–12,8 V (špatně < 12,0)'],
+      ['Atmosférický tlak', '950–1050 mbar']
+    ]]
+  ];
+}
 let PROFILE = PROFILES[CFG.profile] || PROFILES.a4v6;
 function setProfile(id){
   PROFILE = PROFILES[id] || PROFILES.a4v6;

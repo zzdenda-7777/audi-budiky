@@ -60,13 +60,15 @@ const KV = {
 
 const CFG_DEF = {
   sound: true, voice: true,
-  snd: { shift: true, turbo: true, temp: true, volt: true, smoke: false, warm: true, cool: true, timing: true, conn: true },
+  snd: { shift: true, turbo: true, temp: true, volt: true, smoke: false, warm: true, cool: true, timing: true, conn: true, drive: true },
+  lim: { coolWarn: 108, oilWarn: 135, fuelTWarn: 80, voltLow: 12.8, fuelLow: 10 },
   shiftRpm: 4000, mass: 1450, price: 36.5,
   cluster: true, gps: true, autoRec: false,
   span: 60, accMode: '0-100', page: 0, theme: 'moro', nightAuto: true, nightDim: true, lastPos: null, onboarded: false, profile: 'a4v6', massBy: {}
 };
 const CFG = Object.assign(clone(CFG_DEF), KV.get('cfg', {}));
 CFG.snd = Object.assign(clone(CFG_DEF.snd), CFG.snd || {});
+CFG.lim = Object.assign(clone(CFG_DEF.lim), CFG.lim || {});
 applyTheme(CFG.theme === 'night' ? 'night' : CFG.theme);
 let cfgTimer = null;
 function saveCfg(){ clearTimeout(cfgTimer); cfgTimer = setTimeout(() => KV.set('cfg', CFG), 300); }
@@ -275,7 +277,8 @@ const SND_CATS = [
   ['warm','Zahřívání','studený motor ve vysokých otáčkách, motor zahřátý'],
   ['cool','Dochlazení turba','můžeš vypnout motor'],
   ['timing','Měření a testy','start a cíl'],
-  ['conn','Spojení','navázáno a ztraceno']
+  ['conn','Spojení','navázáno a ztraceno'],
+  ['drive','Stav a jízda','nízká nafta, náledí, nahrávání, chyby']
 ];
 const lastBeep = {};
 function ttsOk(){ try { return !!(A && A.say && A.ttsState && A.ttsState() === 1); } catch (_) { return false; } }
@@ -284,7 +287,7 @@ function ttsOk(){ try { return !!(A && A.say && A.ttsState && A.ttsState() === 1
 function beep(cat, kind, minGapMs, say){
   if (!CFG.sound || !CFG.snd[cat] || R.on) return;
   const voice = !!(CFG.voice && say && ttsOk());
-  const t = performance.now(), key = cat + kind;
+  const t = performance.now(), key = cat + kind + (say || ''); // per-message, so different drive messages don't block each other
   let gap = minGapMs || 0;
   if (voice && gap && (kind === 'alarm' || kind === 'info')) gap = Math.max(gap, kind === 'alarm' ? 30000 : 90000);
   if (gap && lastBeep[key] && t - lastBeep[key] < gap) return;
@@ -300,13 +303,15 @@ const ALERTS = [
   { id:'over', say:() => 'Přetlak turba', lvl:'bad', snd:'turbo', txt:'Přetlak turba', hold:1000, test:() => { const b = boostRel(), s = boostSpecRel(); return b != null && s != null && b > 0.3 && s > 0.5 && b - s > 0.15; }, info:() => '+' + fmt(boostRel() - boostSpecRel(), 2) + ' bar' },
   { id:'under', say:() => 'Nedotlak turba', lvl:'warn', snd:'turbo', txt:'Nedotlak turba', hold:1500, test:() => { const b = boostRel(), s = boostSpecRel(), rpm = fresh('rpm', 3000) || 0; return b != null && s != null && rpm > 2000 && s > 0.5 && s - b > 0.25; }, info:() => fmt(boostRel() - boostSpecRel(), 2) + ' bar' },
   { id:'cool2', say:() => 'Přehřívání motoru, voda ' + n0(any('cool')) + ' stupňů', lvl:'bad', snd:'temp', txt:'Přehřívání motoru', hold:1000, test:() => (fresh('cool', 10000) || 0) > 113, info:() => fmt(any('cool'), 0) + ' °C' },
-  { id:'cool', say:() => 'Vysoká teplota vody, ' + n0(any('cool')) + ' stupňů', lvl:'warn', snd:'temp', txt:'Vysoká teplota vody', hold:2000, test:() => (fresh('cool', 10000) || 0) > 108, info:() => fmt(any('cool'), 0) + ' °C' },
-  { id:'oil', say:() => 'Vysoká teplota oleje, ' + n0(any('oilT')) + ' stupňů', lvl:'bad', snd:'temp', txt:'Vysoká teplota oleje', hold:1000, test:() => (any('oilT') || 0) > 135, info:() => fmt(any('oilT'), 0) + ' °C' },
-  { id:'fuel', say:() => 'Horké palivo, ' + n0(any('fuelT')) + ' stupňů', lvl:'warn', snd:'temp', txt:'Horké palivo', hold:3000, test:() => (fresh('fuelT', 10000) || 0) > 80, info:() => fmt(any('fuelT'), 0) + ' °C' },
+  { id:'cool', say:() => 'Vysoká teplota vody, ' + n0(any('cool')) + ' stupňů', lvl:'warn', snd:'temp', txt:'Vysoká teplota vody', hold:2000, test:() => (fresh('cool', 10000) || 0) > CFG.lim.coolWarn, info:() => fmt(any('cool'), 0) + ' °C' },
+  { id:'oil', say:() => 'Vysoká teplota oleje, ' + n0(any('oilT')) + ' stupňů', lvl:'bad', snd:'temp', txt:'Vysoká teplota oleje', hold:1000, test:() => (any('oilT') || 0) > CFG.lim.oilWarn, info:() => fmt(any('oilT'), 0) + ' °C' },
+  { id:'fuel', say:() => 'Horké palivo, ' + n0(any('fuelT')) + ' stupňů', lvl:'warn', snd:'temp', txt:'Horké palivo', hold:3000, test:() => (fresh('fuelT', 10000) || 0) > CFG.lim.fuelTWarn, info:() => fmt(any('fuelT'), 0) + ' °C' },
+  { id:'lowfuel', say:() => 'Dochází nafta', lvl:'warn', snd:'drive', txt:'Dochází nafta', hold:4000, test:() => { const l = any('fuelL'); return l != null && l < CFG.lim.fuelLow; }, info:() => fmt(any('fuelL'), 0) + ' l' },
+  { id:'ice', say:() => 'Pozor, může být náledí', lvl:'warn', snd:'drive', txt:'Náledí', hold:3000, test:() => { const o = any('outT'); return o != null && o <= 3; }, info:() => fmt(any('outT'), 0) + ' °C' },
   { id:'afr2', say:() => 'Velmi bohatá směs', lvl:'bad', snd:'smoke', txt:'Velmi bohatá směs', hold:800, test:() => { const a = afr(), iq = fresh('iq', 3000) || 0; return a != null && iq > 15 && a < 14; }, info:() => fmt(afr(), 1) + ':1' },
   { id:'afr', say:() => 'Bohatá směs, kouří', lvl:'warn', snd:'smoke', txt:'Bohatá směs (kouř)', hold:1000, test:() => { const a = afr(), iq = fresh('iq', 3000) || 0; return a != null && iq > 15 && a < 16; }, info:() => fmt(afr(), 1) + ':1' },
   { id:'maf', say:() => 'Málo vzduchu', lvl:'warn', snd:'turbo', txt:'Málo vzduchu (MAF)', hold:2500, test:() => { const v = fresh('maf', 3000), s = fresh('mafSpec', 3000), rpm = fresh('rpm', 3000) || 0; return v != null && s > 500 && rpm > 1800 && v < s * 0.85; }, info:() => fmt((fresh('maf') / fresh('mafSpec') - 1) * 100, 0) + ' %' },
-  { id:'volt', say:() => 'Alternátor nenabíjí, ' + n1(any('volt')) + ' voltu', lvl:'warn', snd:'volt', txt:'Alternátor nenabíjí', hold:5000, test:() => { const v = fresh('volt', 8000), rpm = fresh('rpm', 3000) || 0; return v != null && rpm > 700 && v < 12.8; }, info:() => fmt(any('volt'), 1) + ' V' }
+  { id:'volt', say:() => 'Alternátor nenabíjí, ' + n1(any('volt')) + ' voltu', lvl:'warn', snd:'volt', txt:'Alternátor nenabíjí', hold:5000, test:() => { const v = fresh('volt', 8000), rpm = fresh('rpm', 3000) || 0; return v != null && rpm > 700 && v < CFG.lim.voltLow; }, info:() => fmt(any('volt'), 1) + ' V' }
 ];
 const aState = {};
 function activeAlerts(){

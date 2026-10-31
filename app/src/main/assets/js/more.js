@@ -65,7 +65,10 @@ function onFaultsData(d){
   const key = d.u === CLU ? 'clu' : 'eng';
   FLT.busy = null;
   if (d.err) FLT[key] = { t: Date.now(), err: d.err };
-  else { const list = (d.f || []).map(x => ({ c: x.c, s: x.s })); FLT[key] = { t: Date.now(), list }; saveFaults(d.u, list); }
+  else {
+    const list = (d.f || []).map(x => ({ c: x.c, s: x.s })); FLT[key] = { t: Date.now(), list }; saveFaults(d.u, list);
+    beep('drive', 'info', 0, list.length ? 'Našel jsem ' + list.length + (list.length === 1 ? ' chybu' : list.length < 5 ? ' chyby' : ' chyb') : 'Žádné chyby');
+  }
   if (curView === 'more' && moreSub === 'faults') renderFaults();
 }
 function faultBlock(name, r){
@@ -94,8 +97,8 @@ function readFaultsNow(unit){
 
 /* ---------- recordings ---------- */
 function onRecState(s){
-  if (s.on) REC = { on: true, start: Date.now(), name: s.name, msg: '' };
-  else { REC.on = false; REC.msg = s.msg || ''; if (s.msg) showToast('Záznam uložen'); }
+  if (s.on) { REC = { on: true, start: Date.now(), name: s.name, msg: '' }; beep('drive', 'info', 0, 'Nahrávám jízdu'); }
+  else { REC.on = false; REC.msg = s.msg || ''; if (s.msg) { showToast('Záznam uložen'); beep('drive', 'info', 0, 'Záznam uložen'); } }
   $('recBadge').classList.toggle('on', REC.on);
   if (curView === 'more' && moreSub === 'recs') renderRecs();
 }
@@ -147,9 +150,18 @@ function renderSettings(){
 }
 
 /* ---------- sounds ---------- */
-const SND_TEST = { shift: 'shift', turbo: 'alarm', temp: 'alarm', volt: 'info', smoke: 'info', warm: 'done', cool: 'done', timing: 'start', conn: 'conn' };
+const SND_TEST = { shift: 'shift', turbo: 'alarm', temp: 'alarm', volt: 'info', smoke: 'info', warm: 'done', cool: 'done', timing: 'start', conn: 'conn', drive: 'info' };
 const SND_SAY = { shift: 'řaď', turbo: 'Nedotlak turba', temp: 'Vysoká teplota vody, 110 stupňů', volt: 'Alternátor nenabíjí, 12,6 voltu', smoke: 'Bohatá směs, kouří',
-  warm: 'Motor zahřátý', cool: 'Turbo vychladlé, můžeš vypnout motor', timing: '0 až 100 za 9,8 sekundy', conn: 'Spojení obnoveno' };
+  warm: 'Motor zahřátý', cool: 'Turbo vychladlé, můžeš vypnout motor', timing: '0 až 100 za 9,8 sekundy', conn: 'Spojení obnoveno', drive: 'Dochází nafta' };
+/* which thresholds a sound category uses, shown as editable rows */
+const SND_LIMS = {
+  shift: [['shiftRpm', 'Řadit při', 'ot/min', 100, 1500, 6000]],
+  temp: [['coolWarn', 'Vysoká voda nad', '°C', 1, 90, 125], ['oilWarn', 'Vysoký olej nad', '°C', 1, 110, 160], ['fuelTWarn', 'Horké palivo nad', '°C', 1, 60, 100]],
+  volt: [['voltLow', 'Nízké napětí pod', 'V', 0.1, 11, 13.5]],
+  drive: [['fuelLow', 'Nízká nafta pod', 'l', 1, 3, 25]]
+};
+function limVal(key){ return key === 'shiftRpm' ? CFG.shiftRpm : CFG.lim[key]; }
+function limSet(key, v){ if (key === 'shiftRpm') CFG.shiftRpm = v; else CFG.lim[key] = v; }
 function renderSounds(){
   let ts = 0; try { ts = A && A.ttsState ? A.ttsState() : 0; } catch (_) {}
   const ttsLine = ts === 1 ? '<span style="color:var(--ok)">✓ čeština v telefonu je</span>' : ts === 2 ? '<span style="color:var(--warn)">V telefonu chybí čeština pro předčítání – zatím se pípá.</span>' : ts === 3 ? '<span style="color:var(--warn)">Předčítání v telefonu nefunguje – zatím se pípá.</span>' : 'Hlas se načítá…';
@@ -157,11 +169,13 @@ function renderSounds(){
     '<div class="lbl2">Jak upozorňovat</div><div class="seg" id="sndMode"><button data-m="voice">Hlasem</button><button data-m="beep">Pípnutím</button></div>' +
     '<p class="note" style="margin:8px 0 0">' + ttsLine + (CFG.voice ? '<br>Hlas mluví jako navigace – když hraje rádio přes Bluetooth, ztiší ho a promluví do reproduktorů auta.' : '') + '</p>' +
     (CFG.voice && (ts === 2 || ts === 3) ? '<button class="btn small" id="ttsSet" style="margin-top:8px">Nastavení předčítání v telefonu</button>' : '') + '</div>' +
-    '<div class="card">' + SND_CATS.map(c => '<div class="switch"><span class="sw-t">' + c[1] + '<small>' + (CFG.voice ? '„' + esc(SND_SAY[c[0]]) + '“' : c[2]) + '</small></span><button class="ibtn" data-try="' + c[0] + '" aria-label="Přehrát">' + ICON.sound + '</button><button class="tog' + (CFG.snd[c[0]] ? ' on' : '') + '" data-snd="' + c[0] + '" aria-label="' + c[1] + '"></button></div>').join('') +
-    '</div><p class="note" style="margin-top:10px">Hlasitost řídí hlasitost médií v telefonu. Řazení se ozve v ' + fmt(CFG.shiftRpm, 0) + ' ot/min (změníš v Nastavení). Varování hlasem se opakují nejvýš jednou za 30 s, aby se v autě pořád nemluvilo.</p>';
+    '<div class="card">' + SND_CATS.map(c => '<div class="switch"><span class="sw-t">' + c[1] + '<small>' + (CFG.voice ? '„' + esc(SND_SAY[c[0]]) + '“' : c[2]) + '</small></span><button class="ibtn" data-try="' + c[0] + '" aria-label="Přehrát">' + ICON.sound + '</button><button class="tog' + (CFG.snd[c[0]] ? ' on' : '') + '" data-snd="' + c[0] + '" aria-label="' + c[1] + '"></button></div>' +
+      ((CFG.snd[c[0]] && SND_LIMS[c[0]]) ? SND_LIMS[c[0]].map(l => '<div class="switch" style="padding-left:12px"><span class="sw-t" style="color:var(--muted)">' + l[1] + '</span><input class="num-in" id="lim_' + l[0] + '" type="number" inputmode="decimal" step="' + l[3] + '" value="' + fmt(limVal(l[0]), l[3] < 1 ? 1 : 0).replace(',', '.') + '"><span style="color:var(--muted);font-size:13px;width:3em">' + l[2] + '</span></div>').join('') : '')).join('') +
+    '</div><p class="note" style="margin-top:10px">Hlasitost řídí hlasitost médií v telefonu. U upozornění, co mají pod sebou číslo, si nastavíš, při jaké hodnotě se ozvou. Varování hlasem se opakují nejvýš jednou za 30 s, aby se v autě pořád nemluvilo.</p>';
   $('sndAll').onclick = () => { CFG.sound = !CFG.sound; saveCfg(); renderSounds(); };
   $('sndMode').querySelectorAll('button').forEach(b => { b.classList.toggle('on', (b.dataset.m === 'voice') === !!CFG.voice); b.onclick = () => { CFG.voice = b.dataset.m === 'voice'; saveCfg(); renderSounds(); }; });
   if ($('ttsSet')) $('ttsSet').onclick = () => { if (A && A.openTtsSettings) A.openTtsSettings(); };
+  Object.values(SND_LIMS).flat().forEach(l => { const el = $('lim_' + l[0]); if (!el) return; el.onchange = e => { const v = parseFloat(String(e.target.value).replace(',', '.')); if (isFinite(v) && v >= l[4] && v <= l[5]) { limSet(l[0], v); saveCfg(); } else e.target.value = fmt(limVal(l[0]), l[3] < 1 ? 1 : 0).replace(',', '.'); }; });
   $('moreBody').querySelectorAll('[data-snd]').forEach(b => b.onclick = () => { const k = b.dataset.snd; CFG.snd[k] = !CFG.snd[k]; saveCfg(); renderSounds(); });
   $('moreBody').querySelectorAll('[data-try]').forEach(b => b.onclick = () => {
     const k = b.dataset.try;
@@ -240,11 +254,10 @@ function renderAbout(){
 function renderCar(){
   $('moreBody').innerHTML = '<p class="note" style="margin:0 0 10px">Podle auta se nastaví hranice (co je v pořádku), testy a výpočty. Při spuštění se aplikace vždy zeptá.</p>' +
     Object.values(PROFILES).map(p => '<button class="pcard' + (p.id === PROFILE.id ? ' on' : '') + '" data-p="' + p.id + '"><b>' + esc(p.name) + '</b><span>' + esc(p.engine) + '</span>' + (p.id === PROFILE.id ? '<em>vybráno</em>' : '') + '</button>').join('') +
-    '<div class="card" style="margin-top:12px"><h3>Hranice pro ' + esc(PROFILE.short) + '</h3>' + kvRows1([
-      ['Klidný chod', '±' + fmt(PROFILE.smooth[0], 1) + ' mg (špatně > ' + fmt(PROFILE.smooth[1], 1) + ')'],
-      ['MAF 3000 ot.', 'min ' + PROFILE.mafMin[0] + ' mg (špatně < ' + PROFILE.mafMin[1] + ')'],
-      ['Turbo', 'odchylka do ±0,10 bar'], ['Voda', '80–108 °C'], ['Palivo', 'do 70 °C'], ['Napětí za chodu', '13,5–14,7 V'],
-      ['Volnoběh', PROFILE.idle[0] + '–' + PROFILE.idle[1] + ' ot/min'], ['Výrobce', PROFILE.kw + ' kW / ' + PROFILE.nm + ' Nm']]) + '</div>';
+    '<div class="lbl2" style="margin-top:14px">Hranice pro ' + esc(PROFILE.short) + '</div>' +
+    limitRows().map(g => '<div class="lbl2" style="margin:12px 2px 4px;color:var(--faint)">' + esc(g[0]) + '</div><div class="card" style="margin-top:0">' +
+      g[1].map(r => '<div class="limrow"><span>' + esc(r[0]) + '</span><b>' + esc(r[1]) + '</b></div>').join('') + '</div>').join('') +
+    '<p class="note" style="margin-top:10px">Hranice vychází z dílenské příručky VW a z praxe. Co je v pořádku, pozor a špatně, má u sebe každá hodnota (podrž prst na hodnotě). Po prvních jízdách je doladíme podle tvého auta.</p>';
   $('moreBody').querySelectorAll('[data-p]').forEach(b => b.onclick = () => { setProfile(b.dataset.p); renderCar(); pushPlan(true); showToast(PROFILE.name); });
 }
 

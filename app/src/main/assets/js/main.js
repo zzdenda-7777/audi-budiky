@@ -165,6 +165,7 @@ window.onLog = o => onLogData(o);
 window.onRec = s => onRecState(s);
 window.onGps = d => {
   if (!d || d.v == null) return;
+  if (!S.gpsEver) { S.gpsEver = true; beep('drive', 'info', 0, 'GPS připravena'); }
   S.gpsV = d.v; S.gpsT = performance.now(); S.gpsAcc = d.acc;
   testsGps(d.v, d.t, performance.now());
   routeGps(d);
