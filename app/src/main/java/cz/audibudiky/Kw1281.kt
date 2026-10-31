@@ -15,6 +15,9 @@ class Field(
 
 class Block(val counter: Int, val title: Int, val data: IntArray)
 
+/** The unit answered, but at a different baud rate. */
+class BaudMismatch(val suggested: Int, msg: String) : IOException(msg)
+
 /**
  * KW1281 (VAG K-line) over a KKL USB cable.
  *
@@ -30,6 +33,8 @@ class Kw1281(
     private val buf = ByteArray(512)
     private var counter = 0
     private var echo: Boolean? = null
+    var connectedBaud = 0
+        private set
 
     private fun fill(timeoutMs: Int): Boolean {
         val n = port.read(buf, timeoutMs.coerceAtLeast(1))
@@ -108,33 +113,57 @@ class Kw1281(
         log("Posílám adresu %02X rychlostí 5 baud…".format(address))
         fiveBaud(address)
 
-        val deadline = SystemClock.elapsedRealtime() + 2500
+        var deadline = SystemClock.elapsedRealtime() + 2500
         var gotSync = false
+        var curBaud = baud
+        var switched = false
+        var garbage = 0
+        val ignored = StringBuilder()
         while (SystemClock.elapsedRealtime() < deadline) {
             val b = try { readByte(300) } catch (e: IOException) { continue }
             if (b == 0x55) { gotSync = true; break }
-            log("Ignoruji bajt %02X".format(b))
+            if (ignored.length < 120) ignored.append("%02X ".format(b))
+            if (b != 0x00) garbage++
+            // 0x55 sent at 9600 Bd and read at 10400 Bd arrives as 0xB5 / 0x95.
+            if (!switched && curBaud == 10400 && (b == 0xB5 || b == 0x95)) {
+                curBaud = 9600
+                switched = true
+                port.setParameters(curBaud, 8, UsbSerialPort.STOPBITS_1, UsbSerialPort.PARITY_NONE)
+                rx.clear()
+                log("Jednotka odpovídá rychlostí 9600 Bd, přepínám a čekám na zopakování…")
+                deadline = SystemClock.elapsedRealtime() + 2500
+            }
         }
-        if (!gotSync) throw IOException("Jednotka neodpověděla. Je zapnuté zapalování a kabel v OBD zásuvce?")
+        if (ignored.isNotEmpty()) log("Přijato místo synchronizace: ${ignored.toString().trim()}")
+        if (!gotSync) {
+            if (switched) throw BaudMismatch(9600, "Jednotka mluví rychlostí 9600 Bd, příště se připojím rovnou tak")
+            if (garbage > 0) throw BaudMismatch(if (baud == 10400) 9600 else 10400,
+                "Jednotka odpovídá, ale jinou rychlostí – zkusím jinou")
+            throw IOException("Jednotka neodpověděla. Je zapnuté zapalování a kabel v OBD zásuvce?")
+        }
+        connectedBaud = curBaud
 
         val kb1 = readByte(500)
         val kb2 = readByte(500)
-        log("Synchronizace OK, klíčová slova %02X %02X".format(kb1, kb2))
+        log("Synchronizace OK ($curBaud Bd), klíčová slova %02X %02X".format(kb1, kb2))
         SystemClock.sleep(30)
         writeByte(kb2 xor 0xFF)
 
-        val ident = ArrayList<String>()
+        val sb = StringBuilder()
         var guard = 0
         while (guard++ < 20) {
             val blk = receiveBlock()
             if (blk.title == 0x09) break
             if (blk.title == 0xF6) {
-                val txt = String(ByteArray(blk.data.size) { blk.data[it].toByte() }, Charsets.ISO_8859_1).trim()
-                if (txt.isNotEmpty()) ident.add(txt)
+                for (c in blk.data) {
+                    val ch = c and 0x7F
+                    sb.append(if (ch in 0x20..0x7E) ch.toChar() else ' ')
+                }
             }
             sendBlock(0x09, IntArray(0))
         }
-        return ident
+        val txt = sb.toString().replace(Regex(" {2,}"), "  ").trim()
+        return if (txt.isEmpty()) emptyList() else listOf(txt)
     }
 
     private fun recvWithComplement(): Int {

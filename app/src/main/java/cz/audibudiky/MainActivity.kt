@@ -53,6 +53,7 @@ class MainActivity : Activity() {
     @Volatile private var clusterPeriodMs = 120_000L
     @Volatile private var clusterNow = false
     @Volatile private var clusterBaud = 0
+    @Volatile private var engineBaud = 10400
     @Volatile private var clusterFails = 0
     private var locationManager: LocationManager? = null
     private val tone: ToneGenerator? by lazy {
@@ -97,6 +98,7 @@ class MainActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        try { engineBaud = getSharedPreferences("ab", 0).getInt("engineBaud", 10400) } catch (_: Exception) { }
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         recorder = Recorder(logDir)
         web = WebView(this)
@@ -338,6 +340,7 @@ class MainActivity : Activity() {
                 for (g in intArrayOf(1, 2, 3)) {
                     val t0 = SystemClock.elapsedRealtime()
                     val f = k.readGroup(g)
+                    log("[přístroje] skupina %03d: %s".format(g, f.joinToString(" | ") { it.text + " [t" + it.type + "]" }))
                     recorder.write(0x17, g, f)
                     emit(0x17, g, f, SystemClock.elapsedRealtime() - t0)
                 }
@@ -450,7 +453,11 @@ class MainActivity : Activity() {
                 val k = Kw1281(port) { log(it) }
                 try {
                     status("Probouzím řídicí jednotku motoru…", false)
-                    val ident = k.connect(address, 10400)
+                    val ident = k.connect(address, engineBaud)
+                    if (k.connectedBaud != 0) {
+                        engineBaud = k.connectedBaud
+                        try { getSharedPreferences("ab", 0).edit().putInt("engineBaud", engineBaud).apply() } catch (_: Exception) { }
+                    }
                     failures = 0
                     val name = ident.joinToString(" · ")
                     status("Spojeno", true)
@@ -470,6 +477,8 @@ class MainActivity : Activity() {
                     k.end()
                 } catch (e: Exception) {
                     if (!running) break
+                    if (e is BaudMismatch) engineBaud = e.suggested
+                    else if (failures >= 1) engineBaud = if (engineBaud == 10400) 9600 else 10400
                     failures++
                     status("Spojení přerušeno, zkouším znovu…", false)
                     log("Chyba: ${e.message}")
