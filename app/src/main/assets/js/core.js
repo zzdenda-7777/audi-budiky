@@ -28,6 +28,7 @@ const ICON = {
   down:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>',
   play:'<svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>',
   pause:'<svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 5h4v14H7zM13 5h4v14h-4z"/></svg>',
+  info:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v6"/><circle cx="12" cy="7.6" r="1.1" fill="currentColor" stroke="none"/></svg>',
   sound:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 10v4h4l5 4V6L8 10z"/><path d="M16 9a4 4 0 0 1 0 6"/></svg>'
 };
 
@@ -60,7 +61,7 @@ const CFG_DEF = {
   snd: { shift: true, turbo: true, temp: true, volt: true, smoke: false, warm: true, cool: true, timing: true, conn: true },
   shiftRpm: 4000, mass: 1450, price: 36.5,
   cluster: true, gps: true, autoRec: false,
-  span: 60, accMode: '0-100', page: 0, theme: 'moro', onboarded: false
+  span: 60, accMode: '0-100', page: 0, theme: 'moro', onboarded: false, profile: 'a4v6', massBy: {}
 };
 const CFG = Object.assign(clone(CFG_DEF), KV.get('cfg', {}));
 CFG.snd = Object.assign(clone(CFG_DEF.snd), CFG.snd || {});
@@ -185,7 +186,7 @@ const VAL = [
     sub:() => { const v = fresh('maf'), s = fresh('mafSpec'); if (s == null) return ''; return 'požad. ' + fmt(s, 0) + ((v != null && s > 300) ? ' · ' + (v >= s ? '+' : '') + fmt((v / s - 1) * 100, 0) + ' %' : ''); },
     range:[0, 1200], step:300 },
   { id:'afr', name:'Vzduch / palivo', unit:':1', d:1, cat:'turbo', need:[[1],[3]], get:afr,
-    sub:() => { const a = afr(); return a == null ? '' : 'λ ' + fmt(a / 14.5, 2) + (a < 17 ? ' · kouří' : ''); },
+    sub:() => { const a = afr(); return a == null ? '' : 'λ ' + fmt(a / 14.5, 2); },
     range:[10, 60], step:10, warn:v => v < 18, bad:v => v < 15.5 },
   { id:'n75', name:'Ventil N75', unit:'%', d:0, cat:'turbo', need:[[11]], get:() => fresh('n75'), range:[0, 100], step:25 },
   { id:'egr', name:'EGR ventil', unit:'%', d:0, cat:'turbo', need:[[3]], get:() => fresh('egr'), range:[0, 100], step:25 },
@@ -220,7 +221,7 @@ const VAL = [
     sub:() => fuelNow() != null ? 'v nádrži ≈ ' + fmt(fuelNow(), 0) + ' l' : 'potřebuje panel a GPS', range:[0, 1000], step:250 },
   { id:'fuelL', name:'V nádrži', unit:'l', d:0, cat:'jizda', est:true, need:[], clu:true, get:() => fuelNow(), sub:() => S.cluRead ? 'od načtení panelu' : 'načte se z panelu', range:[0, 70], step:10, warn:v => v < 8 },
   { id:'volt', name:'Napětí', unit:'V', d:1, cat:'el', need:[[12]], get:() => fresh('volt', 10000),
-    sub:() => { const v = fresh('volt', 10000); return v == null ? '' : (v > 13.4 ? 'nabíjí' : 'nenabíjí'); }, range:[10, 16], step:2, warn:v => v < 12.2 || v > 14.9 },
+    range:[10, 16], step:2, warn:v => v < 12.2 || v > 14.9 },
   { id:'rate', name:'Obnova dat', unit:'/s', d:1, cat:'el', need:[], get:readRate, sub:() => 'skupin za sekundu', range:[0, 10], step:2 }
 ];
 const VALBY = {}; VAL.forEach(v => VALBY[v.id] = v);
@@ -287,12 +288,12 @@ function beep(cat, kind, minGapMs){
 const ALERTS = [
   { id:'over', lvl:'bad', snd:'turbo', txt:'Přetlak turba', hold:1000, test:() => { const b = boostRel(), s = boostSpecRel(); return b != null && s != null && b > 0.3 && s > 0.5 && b - s > 0.15; }, info:() => '+' + fmt(boostRel() - boostSpecRel(), 2) + ' bar' },
   { id:'under', lvl:'warn', snd:'turbo', txt:'Nedotlak turba', hold:1500, test:() => { const b = boostRel(), s = boostSpecRel(), rpm = fresh('rpm', 3000) || 0; return b != null && s != null && rpm > 2000 && s > 0.5 && s - b > 0.25; }, info:() => fmt(boostRel() - boostSpecRel(), 2) + ' bar' },
-  { id:'cool2', lvl:'bad', snd:'temp', txt:'Přehřívání motoru', hold:1000, test:() => (fresh('cool', 10000) || 0) > 112, info:() => fmt(any('cool'), 0) + ' °C' },
-  { id:'cool', lvl:'warn', snd:'temp', txt:'Vysoká teplota vody', hold:2000, test:() => (fresh('cool', 10000) || 0) > 105, info:() => fmt(any('cool'), 0) + ' °C' },
+  { id:'cool2', lvl:'bad', snd:'temp', txt:'Přehřívání motoru', hold:1000, test:() => (fresh('cool', 10000) || 0) > 113, info:() => fmt(any('cool'), 0) + ' °C' },
+  { id:'cool', lvl:'warn', snd:'temp', txt:'Vysoká teplota vody', hold:2000, test:() => (fresh('cool', 10000) || 0) > 108, info:() => fmt(any('cool'), 0) + ' °C' },
   { id:'oil', lvl:'bad', snd:'temp', txt:'Vysoká teplota oleje', hold:1000, test:() => (any('oilT') || 0) > 135, info:() => fmt(any('oilT'), 0) + ' °C' },
   { id:'fuel', lvl:'warn', snd:'temp', txt:'Horké palivo', hold:3000, test:() => (fresh('fuelT', 10000) || 0) > 80, info:() => fmt(any('fuelT'), 0) + ' °C' },
-  { id:'afr2', lvl:'bad', snd:'smoke', txt:'Velmi bohatá směs', hold:800, test:() => { const a = afr(), iq = fresh('iq', 3000) || 0; return a != null && iq > 15 && a < 15; }, info:() => fmt(afr(), 1) + ':1' },
-  { id:'afr', lvl:'warn', snd:'smoke', txt:'Bohatá směs (kouř)', hold:1000, test:() => { const a = afr(), iq = fresh('iq', 3000) || 0; return a != null && iq > 15 && a < 17; }, info:() => fmt(afr(), 1) + ':1' },
+  { id:'afr2', lvl:'bad', snd:'smoke', txt:'Velmi bohatá směs', hold:800, test:() => { const a = afr(), iq = fresh('iq', 3000) || 0; return a != null && iq > 15 && a < 14; }, info:() => fmt(afr(), 1) + ':1' },
+  { id:'afr', lvl:'warn', snd:'smoke', txt:'Bohatá směs (kouř)', hold:1000, test:() => { const a = afr(), iq = fresh('iq', 3000) || 0; return a != null && iq > 15 && a < 16; }, info:() => fmt(afr(), 1) + ':1' },
   { id:'maf', lvl:'warn', snd:'turbo', txt:'Málo vzduchu (MAF)', hold:2500, test:() => { const v = fresh('maf', 3000), s = fresh('mafSpec', 3000), rpm = fresh('rpm', 3000) || 0; return v != null && s > 500 && rpm > 1800 && v < s * 0.85; }, info:() => fmt((fresh('maf') / fresh('mafSpec') - 1) * 100, 0) + ' %' },
   { id:'volt', lvl:'warn', snd:'volt', txt:'Alternátor nenabíjí', hold:5000, test:() => { const v = fresh('volt', 8000), rpm = fresh('rpm', 3000) || 0; return v != null && rpm > 700 && v < 12.8; }, info:() => fmt(any('volt'), 1) + ' V' }
 ];

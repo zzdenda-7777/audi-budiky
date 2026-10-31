@@ -25,6 +25,7 @@ const FLT = { eng: null, clu: null, busy: null };
 let REC = { on: false, start: 0, name: '', msg: '' };
 
 const MENU = [
+  ['car', 'Auto', ''],
   ['check', 'Kontrola spojení', 'Krok po kroku: kabel, přístup, motor, data, GPS'],
   ['faults', 'Chybové kódy', 'Přečíst chyby motoru a přístrojů (jen čtení)'],
   ['recs', 'Záznamy jízd', 'Nahrávání do CSV, sdílení, přehrání'],
@@ -44,6 +45,7 @@ function renderMore(){
   const head = $('moreHead'), body = $('moreBody');
   if (!moreSub) {
     head.hidden = true;
+    MENU[0][2] = PROFILE.name;
     body.innerHTML = '<div class="list">' + MENU.map(m => {
       const badge = m[0] === 'log' && unseenLog() ? '<span class="badge">' + unseenLog() + '</span>' : '';
       return '<button class="item" data-m="' + m[0] + '"><div class="tx"><div class="tt">' + m[1] + '</div><div class="ds">' + m[2] + '</div></div>' + badge + '<span class="chev">' + ICON.chev + '</span></button>';
@@ -55,7 +57,7 @@ function renderMore(){
   head.hidden = false;
   head.innerHTML = '<button class="back" id="mBack">' + ICON.back + 'Více</button><h2>' + title + '</h2>';
   $('mBack').onclick = () => openMore(null);
-  ({ check: renderCheck, faults: renderFaults, recs: renderRecs, settings: renderSettings, sounds: renderSounds, groups: renderGroups, log: renderLog, about: renderAbout })[moreSub]();
+  ({ car: renderCar, check: renderCheck, faults: renderFaults, recs: renderRecs, settings: renderSettings, sounds: renderSounds, groups: renderGroups, log: renderLog, about: renderAbout })[moreSub]();
 }
 
 /* ---------- fault codes ---------- */
@@ -118,7 +120,7 @@ function numRow(id, title, sub, val, step){ return '<div class="switch"><span cl
 function renderSettings(){
   $('moreBody').innerHTML = '<div class="lbl2">Vzhled</div><div class="card"><div class="seg" id="sTheme"><button data-t="moro">Moro modrá (LZ5J)</button><button data-t="black">Černá</button></div></div>' +
     '<div class="lbl2">Auto</div><div class="card">' +
-    numRow('sMass', 'Hmotnost s řidičem', 'kg – pro virtuální dyno', CFG.mass, 10) +
+    numRow('sMass', 'Hmotnost s řidičem', 'kg – ' + esc(PROFILE.short) + ', pro virtuální dyno', carMass(), 10) +
     numRow('sPrice', 'Cena nafty', 'Kč za litr – pro cenu jízdy', CFG.price, 0.1) +
     numRow('sShift', 'Pípnout na řazení', 'ot/min', CFG.shiftRpm, 100) + '</div>' +
     '<div class="lbl2">Připojení</div><div class="card">' +
@@ -129,7 +131,7 @@ function renderSettings(){
     '<button class="btn ghost wide" id="sDelAll">' + (Date.now() - delAllArm < 4000 ? 'Opravdu smazat celou historii?' : 'Smazat celou historii') + '</button></div>';
   $('sTheme').querySelectorAll('button').forEach(b => { b.classList.toggle('on', b.dataset.t === CFG.theme); b.onclick = () => { CFG.theme = b.dataset.t; saveCfg(); applyTheme(CFG.theme); renderSettings(); }; });
   const num = (id, key, min, max) => { $(id).onchange = e => { const v = parseFloat(String(e.target.value).replace(',', '.')); if (isFinite(v) && v >= min && v <= max) { CFG[key] = v; saveCfg(); } else e.target.value = CFG[key]; }; };
-  num('sMass', 'mass', 500, 4000); num('sPrice', 'price', 1, 200); num('sShift', 'shiftRpm', 1500, 6000);
+  $('sMass').onchange = e => { const v = parseFloat(String(e.target.value).replace(',', '.')); if (isFinite(v) && v >= 500 && v <= 4000) { CFG.massBy = CFG.massBy || {}; CFG.massBy[PROFILE.id] = v; saveCfg(); } else e.target.value = carMass(); }; num('sPrice', 'price', 1, 200); num('sShift', 'shiftRpm', 1500, 6000);
   $('sClu').onclick = () => { CFG.cluster = !CFG.cluster; saveCfg(); A && A.setClusterOnConnect && A.setClusterOnConnect(CFG.cluster); renderSettings(); };
   $('sGps').onclick = () => { CFG.gps = !CFG.gps; saveCfg(); if (A) { if (CFG.gps) A.gpsStart && A.gpsStart(); else { A.gpsStop && A.gpsStop(); S.gpsV = null; } } renderSettings(); };
   $('sRec').onclick = () => { CFG.autoRec = !CFG.autoRec; saveCfg(); renderSettings(); };
@@ -215,6 +217,18 @@ function renderAbout(){
     '<button class="btn wide" id="aGuide" style="margin-top:10px">Ukázat průvodce prvním připojením</button>' +
     '<p class="note" style="margin-top:12px">Aplikace z auta jen čte. Nic nezapisuje, nekóduje ani nemaže. Data zůstávají v telefonu, aplikace nemá přístup k internetu.</p>';
   $('aGuide').onclick = openGuide;
+}
+
+/* ---------- car choice ---------- */
+function renderCar(){
+  $('moreBody').innerHTML = '<p class="note" style="margin:0 0 10px">Podle auta se nastaví hranice (co je v pořádku), testy a výpočty. Při spuštění se aplikace vždy zeptá.</p>' +
+    Object.values(PROFILES).map(p => '<button class="pcard' + (p.id === PROFILE.id ? ' on' : '') + '" data-p="' + p.id + '"><b>' + esc(p.name) + '</b><span>' + esc(p.engine) + '</span>' + (p.id === PROFILE.id ? '<em>vybráno</em>' : '') + '</button>').join('') +
+    '<div class="card" style="margin-top:12px"><h3>Hranice pro ' + esc(PROFILE.short) + '</h3>' + kvRows1([
+      ['Klidný chod', '±' + fmt(PROFILE.smooth[0], 1) + ' mg (špatně > ' + fmt(PROFILE.smooth[1], 1) + ')'],
+      ['MAF 3000 ot.', 'min ' + PROFILE.mafMin[0] + ' mg (špatně < ' + PROFILE.mafMin[1] + ')'],
+      ['Turbo', 'odchylka do ±0,10 bar'], ['Voda', '80–108 °C'], ['Palivo', 'do 70 °C'], ['Napětí za chodu', '13,5–14,7 V'],
+      ['Volnoběh', PROFILE.idle[0] + '–' + PROFILE.idle[1] + ' ot/min'], ['Výrobce', PROFILE.kw + ' kW / ' + PROFILE.nm + ' Nm']]) + '</div>';
+  $('moreBody').querySelectorAll('[data-p]').forEach(b => b.onclick = () => { setProfile(b.dataset.p); renderCar(); pushPlan(true); showToast(PROFILE.name); });
 }
 
 /* ---------- connection check ---------- */

@@ -37,7 +37,8 @@
       case 10: return [F(39, c.maf, 'mg/zdvih'), F(18, 1000, 'mbar'), F(18, c.act, 'mbar'), F(23, c.iq * 2.2, '%')];
       case 11: return [F(1, c.rpm, 'ot/min'), F(18, c.spec, 'mbar'), F(18, c.act, 'mbar'), F(23, 40 + (c.spec - 1000) / 30, '%')];
       case 12: return [F(10, null, '', 'teplý'), F(0, null, '', ''), F(6, 14.1, 'V'), F(5, c.cool, '°C')];
-      case 13: return [F(39, 0.8, 'mg/zdvih'), F(39, -1.4, 'mg/zdvih'), F(39, 2.4, 'mg/zdvih'), F(39, -0.6, 'mg/zdvih')];
+      case 13: return window.__demoV6 ? [F(39, 0.6, 'mg/zdvih'), F(39, -1.2, 'mg/zdvih'), F(1, c.rpm, 'ot/min')] : [F(39, 0.8, 'mg/zdvih'), F(39, -1.4, 'mg/zdvih'), F(39, 2.4, 'mg/zdvih'), F(39, -0.6, 'mg/zdvih')];
+      case 14: return window.__demoV6 ? [F(39, 1.7, 'mg/zdvih'), F(39, -0.4, 'mg/zdvih'), F(39, 0.3, 'mg/zdvih'), F(1, c.rpm, 'ot/min')] : null;
       default: return null;
     }
   }
@@ -79,7 +80,7 @@
       status('Připojuji motor…', 'connecting');
       setTimeout(() => {
         if (cluOn) cluster();
-        call('onIdent', '038906018G  1,9l R4 EDC  G10SG  1608');
+        call('onIdent', window.__demoV6 ? '8E0907401T  2,5l V6 TDI  G000AG  0004' : '038906018G  1,9l R4 EDC  G10SG  1608');
         status('Živě', 'live');
         loop();
       }, 900);

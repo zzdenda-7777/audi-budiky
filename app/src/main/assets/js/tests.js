@@ -72,9 +72,9 @@ const TESTS = [
       const maxAct = Math.max(...s.map(p => p.act)), maxSpec = Math.max(...s.map(p => p.spec));
       let v = 'ok', why = 'Turbo drží požadovaný tlak. Vše v pořádku.';
       if (si < 0) { v = 'bad'; why = 'Turbo vůbec nedosáhlo požadovaného tlaku. Typicky netěsné sání nebo intercooler (prasklá hadice), vadný ventil N75, zanesené nebo zaseklé lopatky VNT, případně opotřebené turbo.'; }
-      else if (over > 0.25) { v = 'bad'; why = 'Přetlak: turbo fouká víc, než jednotka chce. Typicky zasekávající se lopatky VNT nebo ventil N75 – jednotka pak často přejde do nouzového režimu.'; }
-      else if (meanDev < -0.15 || worst < -0.3) { v = 'bad'; why = 'Nedotlak: turbo nedodá požadovaný tlak. Zkontroluj hadice a intercooler (netěsnost), ventil N75 a jeho podtlakové hadičky, lopatky VNT.'; }
-      else if (over > 0.15 || meanDev < -0.08 || worst < -0.2 || (spool != null && spool > 3)) {
+      else if (over > 0.25 || meanDev > 0.20) { v = 'bad'; why = 'Přetlak: turbo fouká víc, než jednotka chce. Typicky zasekávající se lopatky VNT nebo ventil N75 – jednotka pak často přejde do nouzového režimu.'; }
+      else if (meanDev < -0.20 || worst < -0.3) { v = 'bad'; why = 'Nedotlak: turbo nedodá požadovaný tlak. Zkontroluj hadice a intercooler (netěsnost), ventil N75 a jeho podtlakové hadičky, lopatky VNT.'; }
+      else if (Math.abs(meanDev) > 0.10 || over > 0.15 || worst < -0.2 || (spool != null && spool > 3)) {
         v = 'mid'; why = (spool != null && spool > 3) ? 'Turbo se nabuzuje pomalu. Může jít o začínající zanesení VNT nebo menší netěsnost.' : 'Tlak se drží jen přibližně. Zatím ne vážné, sleduj to.';
       }
       TST.res = { v, why, rows: [['Max turbo', fmt(maxAct, 2) + ' bar'], ['Max požadováno', fmt(maxSpec, 2) + ' bar'], ['Průměrná odchylka', (meanDev != null ? (meanDev >= 0 ? '+' : '') + fmt(meanDev, 2) : '–') + ' bar'], ['Nabuzení', spool != null ? fmt(spool, 1) + ' s' : 'nedosáhlo']],
@@ -104,10 +104,14 @@ const TESTS = [
       if (full.length < 4) { TST.st = 'ready'; TST.msg = full.length ? 'Málo dat při plném průtoku. Zkus to znovu a drž plyn déle.' : 'Jednotka nepožadovala plný průtok – sešlápni plyn úplně.'; return; }
       const ratio = avg(full.map(p => p.act)) / avg(full.map(p => p.spec)), maxAct = Math.max(...s.map(p => p.act)), maxSpec = Math.max(...s.map(p => p.spec));
       const idle = TST.d.idle.length ? [avg(TST.d.idle.map(p => p.act)), avg(TST.d.idle.map(p => p.spec))] : null;
+      const near = s.filter(p => p.rpm != null && p.rpm > 2700 && p.rpm < 3300 && p.spec > 700), at3k = near.length ? Math.max(...near.map(p => p.act)) : null;
+      const [mOk, mWarn] = PROFILE.mafMin;
       let v = 'ok', why = 'Motor dostává tolik vzduchu, kolik chce. Váha vzduchu je v pořádku.';
-      if (ratio < 0.85) { v = 'bad'; why = 'Do motoru jde o ' + fmt((1 - ratio) * 100, 0) + ' % méně vzduchu, než chce jednotka. Typicky slábnoucí váha vzduchu (MAF), netěsné sání nebo nedotlak turba. Projeví se kouřem a menším výkonem.'; }
-      else if (ratio < 0.93) { v = 'mid'; why = 'Vzduchu je o ' + fmt((1 - ratio) * 100, 0) + ' % méně, než jednotka chce. Váha vzduchu může začínat slábnout – sleduj to.'; }
-      TST.res = { v, why, rows: [['Max MAF', fmt(maxAct, 0) + ' mg'], ['Max požadováno', fmt(maxSpec, 0) + ' mg'], ['Poměr při plném plynu', fmt(ratio * 100, 0) + ' %'], ['Volnoběh', idle ? fmt(idle[0], 0) + ' / ' + fmt(idle[1], 0) + ' mg' : '–']],
+      if (at3k != null && at3k < mWarn) { v = 'bad'; why = 'Ve 3000 ot. jen ' + fmt(at3k, 0) + ' mg, norma pro ' + PROFILE.short + ' je aspoň ' + mOk + ' mg (' + PROFILE.mafNote + '). Váha vzduchu je nejspíš zralá na výměnu, nebo je netěsné sání.'; }
+      else if (ratio < 0.85) { v = 'bad'; why = 'Do motoru jde o ' + fmt((1 - ratio) * 100, 0) + ' % méně vzduchu, než chce jednotka. Typicky slábnoucí váha vzduchu (MAF), netěsné sání nebo nedotlak turba. Projeví se kouřem a menším výkonem.'; }
+      else if (ratio < 0.93 || (at3k != null && at3k < mOk)) { v = 'mid'; why = 'Vzduchu je o ' + fmt((1 - ratio) * 100, 0) + ' % méně, než jednotka chce. Váha vzduchu může začínat slábnout – sleduj to.'; }
+      if (v === 'mid' && ratio >= 0.93 && at3k != null) why = 'Ve 3000 ot. ' + fmt(at3k, 0) + ' mg – těsně pod normou ' + mOk + ' mg pro ' + PROFILE.short + '. Váha vzduchu začíná slábnout.';
+      TST.res = { v, why, rows: [['Ve 3000 ot.', at3k != null ? fmt(at3k, 0) + ' mg' : 'nezměřeno (drž plyn až přes 3000)'], ['Norma', 'aspoň ' + mOk + ' mg'], ['Max MAF', fmt(maxAct, 0) + ' mg'], ['Max požadováno', fmt(maxSpec, 0) + ' mg'], ['Poměr při plném plynu', fmt(ratio * 100, 0) + ' %'], ['Volnoběh', idle ? fmt(idle[0], 0) + ' / ' + fmt(idle[1], 0) + ' mg' : '–']],
         sum: fmt(ratio * 100, 0) + ' % požadavku, max ' + fmt(maxAct, 0) + ' mg', chart: { a: sortX(s.map(p => [p.rpm, p.spec])), b: sortX(s.map(p => [p.rpm, p.act])), mx: Math.max(1000, maxSpec, maxAct) * 1.1 } };
       TST.st = 'done'; beep('timing', 'done'); saveTest('maf', TST.res);
     },
@@ -140,28 +144,38 @@ const TESTS = [
   { id: 'smooth', name: 'Klidný chod válců', ds: 'Jak jednotka vyrovnává vstřikovače jednotlivých válců', need: () => S.cyl > 4 ? [[13], [14]] : [[13]],
     steps: () => ['Motor zahřátý (voda nad 80 °C), stůj na volnoběh.', 'Vypni klimatizaci, světla a ostatní spotřebiče.', 'Spusť test a 20 sekund se ničeho nedotýkej.'],
     live: () => [['Otáčky', fmt(fresh('rpm', 4000), 0), ''], ['Voda', fmt(fresh('cool', 15000), 0), '°C']],
-    cyls(){ const a = (S.smooth[13] ? S.smooth[13].vals : []).slice(0, 4).concat(S.smooth[14] ? S.smooth[14].vals : []).filter(x => x != null); return a.slice(0, S.cyl); },
+    /* R4: group 013 = cylinders 1–4. V6 (VP44): 013 = cylinders 1, 2 (+3 = reference), 014 = cylinders 4, 5, 6. */
+    cyls(){
+      const g13 = (S.smooth[13] ? S.smooth[13].vals : []).filter(x => x != null), g14 = (S.smooth[14] ? S.smooth[14].vals : []).filter(x => x != null);
+      if (S.cyl <= 4) return g13.slice(0, S.cyl).map((v, i) => ({ c: i + 1, v }));
+      const a = g13.slice(0, 3).map((v, i) => ({ c: i + 1, v }));
+      if (a.length === 2) a.push({ c: 3, v: 0, ref: true });
+      g14.slice(0, 3).forEach((v, i) => a.push({ c: i + 4, v }));
+      return a;
+    },
     start(){ TST.d = { acc: [], last: 0, t0: clock() }; TST.st = 'run'; TST.msg = 'Měřím 20 s…'; beep('timing', 'start'); },
     tick(){
       const d = TST.d, g = S.smooth[13];
-      if (g && g.t !== d.last) { d.last = g.t; const c = this.cyls(); c.forEach((x, i) => { (d.acc[i] = d.acc[i] || []).push(x); }); }
+      if (g && g.t !== d.last) { d.last = g.t; this.cyls().forEach(x => { const k = x.c - 1; (d.acc[k] = d.acc[k] || []).push(x.v); }); }
       d.prog = Math.min(1, (clock() - d.t0) / 20000);
       if (d.prog >= 1) this.finish();
     },
     finish(){
-      const a = TST.d.acc.map(x => avg(x)).filter(x => x != null);
-      if (a.length < 2) { TST.st = 'ready'; TST.msg = 'Jednotka klidný chod nehlásí (skupina 013).'; return; }
-      const worst = Math.max(...a.map(Math.abs)), bad = a.map((x, i) => [i + 1, x]).filter(p => Math.abs(p[1]) > 2);
-      let v = 'ok', why = 'Všechny válce jsou do ±2 mg. Vstřikovače a komprese jsou v pořádku.';
-      if (worst > 3) { v = 'bad'; why = 'Válec ' + bad.map(p => p[0]).join(', ') + ' je mimo ±3 mg. Typicky vadný vstřikovač nebo slabší komprese na tom válci.'; }
-      else if (worst > 2) { v = 'mid'; why = 'Válec ' + bad.map(p => p[0]).join(', ') + ' je těsně nad ±2 mg. Zatím ne vážné, sleduj to.'; }
+      const a = TST.d.acc.map(x => x ? avg(x) : null);
+      if (a.filter(x => x != null).length < 2) { TST.st = 'ready'; TST.msg = 'Jednotka klidný chod nehlásí (skupina 013' + (S.cyl > 4 ? '/014' : '') + ').'; return; }
+      const [okL, warnL] = PROFILE.smooth;
+      const worst = Math.max(...a.filter(x => x != null).map(Math.abs)), bad = a.map((x, i) => [i + 1, x]).filter(p => p[1] != null && Math.abs(p[1]) > okL);
+      let v = 'ok', why = 'Všechny válce jsou do ±' + fmt(okL, 1) + ' mg (norma VW pro ' + PROFILE.short + '). Vstřikovače a komprese jsou v pořádku.';
+      if (worst > warnL) { v = 'bad'; why = 'Válec ' + bad.map(p => p[0]).join(', ') + ' je mimo ±' + fmt(warnL, 1) + ' mg. Typicky vadný vstřikovač nebo slabší komprese na tom válci. VW radí prohodit vstřikovače: když chyba jde s vstřikovačem, je vadný on, když zůstane na válci, změř kompresi.'; }
+      else if (worst > okL) { v = 'mid'; why = 'Válec ' + bad.map(p => p[0]).join(', ') + ' je nad ±' + fmt(okL, 1) + ' mg (norma VW). Zatím ne vážné, sleduj to.'; }
+      if (S.cyl > 4) why += ' Válec 3 je u V6 referenční (má snímač zdvihu jehly), proto ukazuje 0.';
       const cool = fresh('cool', 15000); if (cool != null && cool < 75) why += ' Pozor: motor nebyl zahřátý, výsledek je jen orientační.';
-      TST.res = { v, why, cyl: a, rows: a.map((x, i) => ['Válec ' + (i + 1), (x > 0 ? '+' : '') + fmt(x, 2) + ' mg']), sum: 'nejhorší ±' + fmt(worst, 2) + ' mg' };
+      TST.res = { v, why, cyl: a.map(x => x == null ? 0 : x), rows: a.map((x, i) => ['Válec ' + (i + 1), x == null ? '–' : (x > 0 ? '+' : '') + fmt(x, 2) + ' mg']).concat([['Norma', '±' + fmt(okL, 1) + ' mg']]), sum: 'nejhorší ±' + fmt(worst, 2) + ' mg' };
       TST.st = 'done'; beep('timing', 'done'); saveTest('smooth', TST.res);
     }
   },
   { id: 'dyno', name: 'Virtuální dyno', ds: 'Křivka výkonu a momentu podle otáček', need: () => [[1]], needGps: true,
-    steps: () => pullSteps(['Rovná silnice, GPS musí mít signál (Více → Nastavení → GPS).', 'Hmotnost auta s řidičem nastav ve Více → Nastavení (teď ' + CFG.mass + ' kg).']),
+    steps: () => pullSteps(['Rovná silnice, GPS musí mít signál (Více → Nastavení → GPS).', 'Hmotnost auta s řidičem nastav ve Více → Nastavení (teď ' + carMass() + ' kg).']),
     live: () => [['Otáčky', fmt(fresh('rpm'), 0), ''], ['Vstřik', fmt(fresh('iq'), 1), 'mg'], ['GPS', fmt(gpsSpeed(), 0), 'km/h']],
     start(){ TST.d = { s: [], g: [], last: 0, low: 0 }; TST.st = 'wait'; TST.msg = 'Čekám na plný plyn…'; },
     tick(){
@@ -190,7 +204,7 @@ const TESTS = [
         const pts = [];
         for (let i = 2; i < sm.length - 2; i++) {
           const dt = (sm[i + 2].t - sm[i - 2].t) / 1000; if (dt <= 0) continue;
-          const a = (sm[i + 2].v - sm[i - 2].v) / dt, v = sm[i].v, m = CFG.mass;
+          const a = (sm[i + 2].v - sm[i - 2].v) / dt, v = sm[i].v, m = carMass();
           const P = (m * a + 0.5 * 1.2 * 0.68 * v * v + 0.012 * m * 9.81) * v / 1000;
           const r = rpmAt(sm[i].t); if (r != null && P > 0) pts.push({ rpm: r, kw: P });
         }
@@ -199,8 +213,10 @@ const TESTS = [
         /* GPS that claims much more than the engine can make is noise (bad signal, slope) – don't show it */
         if (maxW != null && maxW > best.kw * 1.3) { kwW = []; maxW = -1; }
       }
-      TST.res = { v: 'none', why: 'Výkon z vstřiku je odhad z množství paliva (účinnost asi 36 %). Výkon na kolech z GPS je po odečtení odporu vzduchu a valení – je vždy o 10–20 % nižší než výkon motoru. Obojí ber orientačně.',
-        rows: [['Max výkon (odhad)', fmt(best.kw, 0) + ' kW / ' + fmt(best.kw * 1.36, 0) + ' k'], ['při', fmt(best.rpm, 0) + ' ot/min'], ['Max moment (odhad)', fmt(bestT.nm, 0) + ' Nm'], ['Na kolech (GPS)', maxW == null ? 'málo GPS dat' : maxW < 0 ? 'GPS nespolehlivá' : fmt(maxW, 0) + ' kW']],
+      const share = best.kw / PROFILE.kw, dv = share >= 0.85 ? 'ok' : share >= 0.75 ? 'mid' : 'bad';
+      TST.res = { v: dv, why: (dv === 'ok' ? 'Motor dává ' : dv === 'mid' ? 'Motor dává jen ' : 'Motor dává málo – ') + fmt(share * 100, 0) + ' % výkonu výrobce (' + PROFILE.kw + ' kW). ' +
+        (dv === 'ok' ? '' : 'Nejdřív udělej test turba a váhy vzduchu. ') + 'Výkon ze vstřiku je odhad z množství paliva (účinnost asi 36 %). Výkon na kolech z GPS je po odečtení odporu vzduchu a valení – vždy o 10–20 % nižší než výkon motoru.',
+        rows: [['Výrobce', PROFILE.kw + ' kW / ' + PROFILE.nm + ' Nm'], ['Max výkon (odhad)', fmt(best.kw, 0) + ' kW / ' + fmt(best.kw * 1.36, 0) + ' k'], ['při', fmt(best.rpm, 0) + ' ot/min'], ['Max moment (odhad)', fmt(bestT.nm, 0) + ' Nm'], ['Na kolech (GPS)', maxW == null ? 'málo GPS dat' : maxW < 0 ? 'GPS nespolehlivá' : fmt(maxW, 0) + ' kW']],
         sum: fmt(best.kw, 0) + ' kW · ' + fmt(bestT.nm, 0) + ' Nm', chart: { kwE, nmE, kwW, mx: Math.max(60, best.kw * 1.2, maxW > 0 ? maxW * 1.1 : 0), nmx: Math.max(150, bestT.nm * 1.2) } };
       TST.st = 'done'; beep('timing', 'done'); saveTest('dyno', TST.res);
     },
@@ -296,8 +312,8 @@ function updateTest(){
   const pr = $('tProg'), p = TST.d && TST.d.prog;
   pr.hidden = !(TST.st === 'run' && p != null); if (!pr.hidden) pr.querySelector('i').style.width = (p * 100).toFixed(0) + '%';
   if (t.id === 'smooth') {
-    const c = TST.st === 'run' && TST.d ? TST.d.acc.map(a => avg(a)) : (TST.res && TST.res.cyl) || t.cyls();
-    $('tCyl').innerHTML = c.length ? c.map((v, i) => { const w = Math.min(50, Math.abs(v) / 4 * 50), cls = Math.abs(v) > 3 ? 'bad' : Math.abs(v) > 2 ? 'warn' : '';
+    const c = TST.st === 'run' && TST.d ? TST.d.acc.map(a => a ? avg(a) : 0) : (TST.res && TST.res.cyl) || t.cyls().map(x => x.v);
+    $('tCyl').innerHTML = c.length ? c.map((v, i) => { const w = Math.min(50, Math.abs(v) / 4 * 50), cls = Math.abs(v) > PROFILE.smooth[1] ? 'bad' : Math.abs(v) > PROFILE.smooth[0] ? 'warn' : '';
       return '<div class="r"><span>' + (i + 1) + '.</span><div class="bar"><i class="' + cls + '" style="' + (v >= 0 ? 'left:50%' : 'right:50%') + ';width:' + w + '%"></i></div><b>' + (v > 0 ? '+' : '') + fmt(v, 2) + '</b></div>'; }).join('') : '';
   }
 }

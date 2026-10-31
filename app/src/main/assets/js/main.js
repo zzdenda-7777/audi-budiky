@@ -51,6 +51,7 @@ function currentPlan(){
 
 /* Android back button */
 window.onBack = function(){
+  if (!$('picker').hidden) return false;
   if (!$('guide').hidden) { closeGuide(); return true; }
   if (!$('sheetBg').hidden) { closeSheet(); return true; }
   if (D.focus) { closeFocus(); return true; }
@@ -67,8 +68,8 @@ function renderStatus(){
   dot.className = 'dot ' + (R.on ? 'replay' : live ? 'live' : BUSY[S.state] ? 'busy' : '');
   let t = R.on ? 'Přehrávání záznamu' : S.stText, s;
   if (R.on) s = recTitle(R.name);
-  else if (live || S.state === 'faults' || S.state === 'cluster') { const c = CAR && HIST.cars[CAR]; const r = readRate(); s = (c ? c.name : 'Motor') + (r ? ' · ' + fmt(r, 1) + ' obnov/s' : ''); }
-  else if (S.state === 'idle') s = LOG.length && /nenalezen|povolen|otevřít/.test(S.stText) ? 'Podrobnosti ve Více → Log chyb' : 'Zapoj kabel a zapni zapalování';
+  else if (live || S.state === 'faults' || S.state === 'cluster') { const r = readRate(); s = PROFILE.short + (r ? ' · ' + fmt(r, 1) + ' obnov/s' : ''); }
+  else if (S.state === 'idle') s = LOG.length && /nenalezen|povolen|otevřít/.test(S.stText) ? 'Podrobnosti ve Více → Log chyb' : PROFILE.short + ' · zapoj kabel a zapni zapalování';
   else s = S.state === 'retry' ? 'Zkouším to znovu sám, nic nedělej' : 'Chvilku…';
   if ($('stT').textContent !== t) $('stT').textContent = t;
   if ($('stS').textContent !== s) $('stS').textContent = s;
@@ -96,13 +97,16 @@ function openGuide(){
 function closeGuide(){ $('guide').hidden = true; if (!CFG.onboarded) { CFG.onboarded = true; saveCfg(); } }
 
 /* ---------- banner: one line, most important first ---------- */
+let bannerTop = null;
+$('banner').onclick = () => { if (bannerTop && bannerTop.tap) bannerTop.tap(); };
 function renderBanner(){
   const items = activeAlerts().concat(engineBanners());
+  if (S.identCyl && S.identCyl !== PROFILE.cyl && !R.on) items.push({ lvl: 'warn', txt: 'Jiné auto než vybrané', info: 'klepni', tap: openPicker });
   const rank = { bad: 0, warn: 1, done: 2, info: 3 };
   items.sort((a, b) => rank[a.lvl] - rank[b.lvl]);
   const b = $('banner');
-  if (!items.length) { if (!b.hidden) { b.hidden = true; b.dataset.h = ''; } return; }
-  const top = items[0];
+  if (!items.length) { bannerTop = null; if (!b.hidden) { b.hidden = true; b.dataset.h = ''; } return; }
+  const top = items[0]; bannerTop = top;
   const html = '<span class="bt">' + (top.lvl === 'bad' || top.lvl === 'warn' ? '⚠ ' : top.lvl === 'done' ? '✓ ' : '') + esc(top.txt) + '</span>' +
     (items.length > 1 ? ' <span class="more">+' + (items.length - 1) + '</span>' : '') + (top.info ? '<small>' + esc(top.info) + '</small>' : '');
   if (b.dataset.h !== html) { b.innerHTML = html; b.dataset.h = html; }
@@ -141,7 +145,7 @@ window.onStatus = s => {
 };
 window.onIdent = t => {
   S.ident = t || '';
-  const m = /\b[RV]\s?(\d{1,2})\b/.exec(S.ident); if (m) { const c = +m[1]; if (c >= 3 && c <= 12) S.cyl = c; }
+  const m = /\b[RV]\s?(\d{1,2})\b/.exec(S.ident); if (m) { const c = +m[1]; if (c >= 3 && c <= 12) { S.cyl = c; S.identCyl = c; } }
   onCarIdent(S.ident); renderStatus();
 };
 window.onClusterIdent = t => { S.cluIdent = t || ''; if (CAR) { carObj(CAR).clu = S.cluIdent; saveHist(); } };
@@ -180,7 +184,7 @@ function frame(){
 let lastTick = performance.now(), tickN = 0, recT = null;
 setInterval(() => {
   const t = performance.now(), dt = Math.min(5, (t - lastTick) / 1000); lastTick = t; tickN++;
-  sample(); renderBanner(); shiftCheck(); tripTick(dt); engineTick(dt);
+  sampleValues(); sample(); renderBanner(); shiftCheck(); tripTick(dt); engineTick(dt);
   if (curView === 'charts') drawCharts();
   if (curView === 'tests' && TST.cur) updateTest();
   if (curView === 'more' && moreSub === 'check' && tickN % 2 === 0 && !touching()) renderCheck();
@@ -201,5 +205,6 @@ if (A && A.setClusterOnConnect) A.setClusterOnConnect(!!CFG.cluster);
 if (CFG.gps && A && A.gpsStart) A.gpsStart();
 renderStatus(); updateBadges(); pushPlan(true);
 requestAnimationFrame(frame);
-if (!CFG.onboarded && !IS_DEMO) openGuide();
+function afterPicker(){ if (!CFG.onboarded && !IS_DEMO) openGuide(); renderPageChips(); buildPage(); pushPlan(true); }
+openPicker();
 if (IS_DEMO) setTimeout(() => A.connect(), 300);

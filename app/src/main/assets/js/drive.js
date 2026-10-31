@@ -31,11 +31,8 @@ const D = { slots: [], disp: {}, peak: {}, mm: {}, focus: null, hud: false, last
 
 function safeGet(v){ try { const x = v.get(); return (x == null || !isFinite(x)) ? null : x; } catch (_) { return null; } }
 function safeSub(v){ try { return v.sub ? (v.sub() || '') : ''; } catch (_) { return ''; } }
-function stateOf(v, x){
-  if (x == null) return '';
-  try { if (v.bad && v.bad(x)) return 'bad'; if (v.warn && v.warn(x)) return 'warn'; } catch (_) {}
-  return '';
-}
+/* warn / bad for colouring the number; the word comes from statusOf (profiles.js) */
+function stateOf(v, x){ const st = statusOf(v.id, x); return st && (st[0] === 'warn' || st[0] === 'bad') ? st[0] : ''; }
 const unitOf = v => v.unitNow ? v.unitNow() : v.unit;
 
 /* ---------- page chips and building ---------- */
@@ -52,7 +49,7 @@ function tileHTML(id, big){
   return '<div class="tile' + (big ? ' big' : '') + '" role="button" data-id="' + id + '">' +
     '<span class="lbl">' + esc(v.name) + (v.est ? '<span class="est">odhad</span>' : '') + '</span>' +
     '<span class="val"><span class="vv"><b class="num">–</b><small class="u">' + esc(v.unit) + '</small></span></span>' +
-    '<span class="sub"></span><span class="bar"><i></i></span></div>';
+    '<span class="stl"><i class="sd"></i><b class="sw"></b><span class="sub"></span></span><canvas class="spark"></canvas></div>';
 }
 function buildPage(){
   const p = PAGES[curPage], body = $('pageBody');
@@ -75,8 +72,9 @@ function buildPage(){
   body.querySelectorAll('[data-id]').forEach(el => {
     const id = el.dataset.id, kind = el.classList.contains('dialcard') ? 'dial' : 'tile';
     D.slots.push({ id, el, kind, cv: kind === 'dial' ? el.querySelector('canvas') : null,
-      num: el.querySelector('.num'), u: el.querySelector('.u'), sub: el.querySelector('.sub'), bar: el.querySelector('.bar i'), txt: '', cls: '' });
-    el.onclick = () => openFocus(id);
+      num: el.querySelector('.num'), u: el.querySelector('.u'), sub: el.querySelector('.sub'), stl: el.querySelector('.stl'), sw: el.querySelector('.sw'),
+      spark: el.querySelector('.spark'), txt: '', cls: '', scls: '' });
+    bindPress(el, () => openFocus(id), () => openInfo(id));
   });
   D.lastSlow = 0;
 }
@@ -111,15 +109,16 @@ function updateDrive(dt){
     if (txt !== s.txt) { s.num.textContent = txt; s.txt = txt; }
     if (slow) {
       const u = avail ? unitOf(v) : ''; if (s.u.textContent !== u) s.u.textContent = u;
+      const st = avail ? statusOf(v.id, x) : null;
       const sub = !avail ? 'tahle jednotka to nehlásí' : safeSub(v);
       if (s.sub.textContent !== sub) s.sub.textContent = sub;
+      const word = st ? st[1] : '';
+      if (s.sw.textContent !== word) s.sw.textContent = word;
+      const scls = 'stl' + (st && st[0] ? ' ' + st[0] : '') + (st ? '' : ' nost');
+      if (scls !== s.scls) { s.stl.className = scls; s.scls = scls; }
       const cls = 'tile' + (s.el.classList.contains('big') ? ' big' : '') + (!avail ? ' na' : x == null ? ' nodata' : '') + (stateOf(v, x) ? ' ' + stateOf(v, x) : '');
       if (cls !== s.cls) { s.el.className = cls; s.cls = cls; }
-      if (s.bar) {
-        const [mn, mx] = v.range || [0, 1];
-        const f = shown == null ? 0 : Math.max(0, Math.min(1, (shown - mn) / (mx - mn)));
-        s.bar.style.width = (f * 100).toFixed(1) + '%';
-      }
+      if (s.spark) drawTrend(s.spark, v, false);
     }
   }
 }
@@ -193,6 +192,15 @@ function drawDial(cv, v, x, raw){
   ctx.fillText(txt, x0, by);
   ctx.font = '600 ' + Math.round(r * 0.12) + 'px sans-serif-condensed, sans-serif'; ctx.fillStyle = TH.muted;
   ctx.fillText(unit, x0 + tw + r * 0.04, by);
+  const dst = avail ? statusOf(v.id, raw) : null;
+  if (dst) {
+    const sc = { ok: '#3ad584', warn: '#ffb01f', bad: '#ff4d4d', info: TH.blue }[dst[0]] || TH.muted;
+    ctx.font = '700 ' + Math.round(Math.max(12 * dpr, r * 0.11)) + 'px sans-serif-condensed, sans-serif';
+    const ww = ctx.measureText(dst[1]).width, dot = r * 0.035, sy = by + r * 0.2;
+    const sx = cx - (ww + dot * 3) / 2;
+    ctx.fillStyle = sc; ctx.beginPath(); ctx.arc(sx + dot, sy - r * 0.04, dot, 0, Math.PI * 2); ctx.fill();
+    ctx.textAlign = 'left'; ctx.fillText(dst[1], sx + dot * 3, sy);
+  }
   // caption top-left, details top-right
   ctx.textAlign = 'left'; ctx.textBaseline = 'top'; ctx.fillStyle = TH.muted;
   ctx.font = '600 ' + Math.round(13 * dpr) + 'px sans-serif-condensed, sans-serif';
@@ -209,12 +217,13 @@ function openFocus(id){
   const v = VALBY[id];
   D.focus = { id, hist: [], lastS: 0, txt: '' };
   const o = $('focus');
-  o.innerHTML = '<div class="ovtop"><span class="lbl">' + esc(v.name) + (v.est ? ' · odhad' : '') + '</span><button class="ibtn" id="fcClose" aria-label="Zavřít">' + ICON.close + '</button></div>' +
-    '<div class="num" id="fcNum">–</div><div class="u" id="fcU">' + esc(v.unit) + '</div><div class="sub" id="fcSub"></div>' +
+  o.innerHTML = '<div class="ovtop"><span class="lbl">' + esc(v.name) + (v.est ? ' · odhad' : '') + '</span><span class="row" style="gap:8px"><button class="ibtn" id="fcInfo" aria-label="Co to je">' + ICON.info + '</button><button class="ibtn" id="fcClose" aria-label="Zavřít">' + ICON.close + '</button></span></div>' +
+    '<div class="num" id="fcNum">–</div><div class="u" id="fcU">' + esc(v.unit) + '</div><div class="fst" id="fcSt"></div><div class="sub" id="fcSub"></div>' +
     '<div class="mm"><span>min <b id="fcMin">–</b></span><span>max <b id="fcMax">–</b></span><button class="btn small ghost" id="fcReset">Vynulovat</button></div>' +
     '<canvas id="fcCv"></canvas>';
   o.hidden = false;
   $('fcClose').onclick = closeFocus;
+  $('fcInfo').onclick = () => openInfo(id);
   $('fcReset').onclick = (e) => { e.stopPropagation(); delete D.mm[id]; delete D.peak[id]; };
   $('fcNum').onclick = closeFocus;
   pushPlan();
@@ -234,7 +243,10 @@ function updateFocus(dt){
     $('fcSub').textContent = !avail ? 'tahle jednotka to nehlásí' : safeSub(v);
     const m = D.mm[F.id]; $('fcMin').textContent = m ? fmt(m.min, v.d) : '–'; $('fcMax').textContent = m ? fmt(m.max, v.d) : '–';
     $('focus').className = 'overlay focus' + (stateOf(v, x) ? ' ' + stateOf(v, x) : '');
-    drawSpark($('fcCv'), F.hist, v);
+    const st = avail ? statusOf(v.id, x) : null;
+    $('fcSt').className = 'fst' + (st && st[0] ? ' ' + st[0] : '');
+    $('fcSt').textContent = st ? '● ' + st[1] : '';
+    drawTrend($('fcCv'), v, true);
   }
 }
 function drawSpark(cv, hist, v){
@@ -345,3 +357,70 @@ function mountEditor(h){
 })();
 
 function flashShift(){ const f = $('flash'); f.classList.add('on'); setTimeout(() => f.classList.remove('on'), 260); }
+
+/* ---------- mini chart: last 60 s, fixed scale, coloured bands, requested value, highest peak ---------- */
+const BANDCOL = { ok: 'rgba(58,213,132,0.11)', warn: 'rgba(255,176,31,0.15)', bad: 'rgba(255,61,61,0.16)', info: 'rgba(127,176,255,0.09)' };
+const STCOL = { ok: '#3ad584', warn: '#ffb01f', bad: '#ff4d4d', info: '#7fb0ff' };
+function drawTrend(cv, v, big){
+  if (!cv) return;
+  const dpr = fitCanvas(cv), ctx = cv.getContext('2d'), W = cv.width, H = cv.height; if (!W || !H) return;
+  ctx.clearRect(0, 0, W, H);
+  const t1 = clock(), t0 = t1 - 60000, pts = (VH[v.id] || []).filter(p => p.t >= t0 && p.t <= t1);
+  let [lo, hi] = v.range || [0, 1];
+  const vals = pts.filter(p => p.v != null).map(p => p.v);
+  if (vals.length) { lo = Math.min(lo, ...vals); hi = Math.max(hi, ...vals); }
+  if (hi - lo < 1e-9) hi = lo + 1;
+  const padT = (big ? 24 : 13) * dpr, padB = (big ? 14 : 2) * dpr, padL = big ? 34 * dpr : 0;
+  const X = t => padL + (t - t0) / 60000 * (W - padL), Y = y => padT + (1 - (y - lo) / (hi - lo)) * (H - padT - padB);
+  if (BANDS[v.id]) BANDS[v.id]().forEach(([a, b, l]) => {
+    const ya = Y(Math.max(lo, Math.min(hi, a))), yb = Y(Math.max(lo, Math.min(hi, b)));
+    if (ya - yb > 0.5) { ctx.fillStyle = BANDCOL[l] || 'transparent'; ctx.fillRect(padL, yb, W - padL, ya - yb); }
+  });
+  if (big) {
+    ctx.strokeStyle = TH.grid; ctx.lineWidth = 1; ctx.fillStyle = TH.muted; ctx.font = (10 * dpr) + 'px monospace'; ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+    for (let i = 0; i <= 4; i++) { const yv = lo + (hi - lo) * i / 4, y = Y(yv); ctx.beginPath(); ctx.moveTo(padL, y); ctx.lineTo(W, y); ctx.stroke(); ctx.fillText(fmt(yv, v.d > 1 ? 1 : v.d), padL - 4 * dpr, y); }
+    ctx.textAlign = 'center'; ctx.textBaseline = 'bottom'; [60, 40, 20, 0].forEach(s => ctx.fillText(s ? '−' + s + ' s' : 'teď', X(t1 - s * 1000), H));
+  }
+  const line = (key, style, w, dash) => {
+    ctx.strokeStyle = style; ctx.lineWidth = w * dpr; ctx.setLineDash(dash ? [4 * dpr, 3 * dpr] : []);
+    ctx.beginPath(); let pen = false;
+    pts.forEach(p => { const y = p[key]; if (y == null) { pen = false; return; } const px = X(p.t), py = Y(Math.max(lo, Math.min(hi, y))); if (pen) ctx.lineTo(px, py); else { ctx.moveTo(px, py); pen = true; } });
+    ctx.stroke(); ctx.setLineDash([]);
+  };
+  if (pts.some(p => p.s != null)) line('s', 'rgba(233,238,248,0.55)', big ? 1.6 : 1.1, true);
+  line('v', TH.text, big ? 2.4 : 1.6, false);
+  // highest peak
+  let pk = null; pts.forEach(p => { if (p.v != null && (!pk || p.v > pk.v)) pk = p; });
+  if (pk && vals.length > 2 && Math.max(...vals) - Math.min(...vals) > (hi - lo) * 0.02) {
+    const px = X(pk.t), py = Y(pk.v), s = (big ? 5 : 3.5) * dpr;
+    ctx.fillStyle = TH.red; ctx.beginPath(); ctx.moveTo(px, py - 1.5 * dpr); ctx.lineTo(px - s, py - s * 1.8); ctx.lineTo(px + s, py - s * 1.8); ctx.closePath(); ctx.fill();
+    const label = 'max ' + fmt(pk.v, v.d);
+    ctx.font = '700 ' + ((big ? 12.5 : 9.5) * dpr) + 'px monospace'; const lw = ctx.measureText(label).width;
+    const lx = Math.max(padL + lw / 2 + 1, Math.min(W - lw / 2 - 1, px)), ly = Math.max((big ? 12 : 9) * dpr, py - s * 1.8 - 2 * dpr);
+    ctx.textAlign = 'center'; ctx.textBaseline = 'bottom'; ctx.fillText(label, lx, ly);
+  }
+  // current value dot coloured by status
+  const last = [...pts].reverse().find(p => p.v != null);
+  if (last) { const st = statusOf(v.id, last.v); ctx.fillStyle = (st && STCOL[st[0]]) || TH.text; ctx.beginPath(); ctx.arc(X(last.t), Y(Math.max(lo, Math.min(hi, last.v))), (big ? 4 : 2.6) * dpr, 0, Math.PI * 2); ctx.fill(); }
+}
+
+/* ---------- tap = full screen, long press = what it is and what is normal ---------- */
+function bindPress(el, tap, long){
+  let tm = null, fired = false, sx = 0, sy = 0;
+  el.addEventListener('touchstart', e => { fired = false; const t = e.touches[0]; sx = t.clientX; sy = t.clientY; clearTimeout(tm); tm = setTimeout(() => { fired = true; long(); }, 550); }, { passive: true });
+  el.addEventListener('touchmove', e => { const t = e.touches[0]; if (Math.abs(t.clientX - sx) > 10 || Math.abs(t.clientY - sy) > 10) clearTimeout(tm); }, { passive: true });
+  el.addEventListener('touchend', () => clearTimeout(tm), { passive: true });
+  el.addEventListener('touchcancel', () => clearTimeout(tm), { passive: true });
+  el.addEventListener('contextmenu', e => { e.preventDefault(); if (!fired) { fired = true; long(); } });
+  el.onclick = () => { if (fired) { fired = false; return; } tap(); };
+}
+function openInfo(id){
+  const v = VALBY[id], inf = VINFO[id] || {}, avail = valAvailable(v), x = avail ? safeGet(v) : null, st = avail ? statusOf(id, x) : null;
+  const sec = (t, txt) => (!txt || txt === '–') ? '' : '<div class="lbl2">' + t + '</div><p class="inftx">' + esc(txt) + '</p>';
+  const vcls = st ? ({ ok: 'ok', warn: 'mid', bad: 'bad' }[st[0]] || 'none') : '';
+  openSheet('<div class="sh"><h3>' + esc(v.name) + '</h3><button class="ibtn" id="inX" aria-label="Zavřít">' + ICON.close + '</button></div><div class="sb">' +
+    '<div class="infnow">Teď: <b>' + (!avail ? 'jednotka nehlásí' : x == null ? '–' : fmt(x, v.d) + ' ' + esc(unitOf(v))) + '</b>' + (st ? ' <span class="verdict ' + vcls + '">' + esc(st[1]) + '</span>' : '') + '</div>' +
+    sec('Co to je', vtext(inf.co)) + sec('Normál · ' + PROFILE.short, vtext(inf.norm)) + sec('Kdy je to špatně', vtext(inf.bad)) + sec('Co s tím', vtext(inf.fix)) +
+    '<p class="note" style="margin-top:12px">Hranice vychází z dílenské příručky VW a z praxe. Po prvních jízdách je doladíme podle tvého auta.</p></div>');
+  $('inX').onclick = closeSheet;
+}
