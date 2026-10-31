@@ -4,706 +4,90 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <title>Audi Budíky</title>
-<style>
-/* Layout: status bar, alert banner, five tabs (Přehled / Grafy / Měření / Skupiny / Log).
-   Overview: boost dial as hero + value tiles. Portrait stacks, landscape puts the dial beside the tiles. */
-:root{
-  --bg:#070505; --panel:#120a09; --panel2:#1a0e0c; --line:#2b1513;
-  --red:#ff3d2e; --red-soft:#c22a1f; --red-deep:#5a120c;
-  --text:#efe6e3; --muted:#8f807c; --faint:#4d3f3c;
-  --ok:#3ad584; --warn:#ffb01f; --bad:#ff3d2e; --blue:#6aa8ff;
-  --cond:"sans-serif-condensed","Roboto Condensed","Arial Narrow",system-ui,sans-serif;
-  --body:system-ui,Roboto,"DejaVu Sans",sans-serif;
-  --mono:"monospace","DejaVu Sans Mono",ui-monospace,monospace;
-}
-*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
-html,body{margin:0;height:100%;background:var(--bg);color:var(--text);font-family:var(--body)}
-body{display:flex;flex-direction:column;padding:env(safe-area-inset-top,0) env(safe-area-inset-right,0) env(safe-area-inset-bottom,0) env(safe-area-inset-left,0)}
-button{font:inherit;color:inherit;cursor:pointer}
-
-.top{display:flex;align-items:center;gap:10px;padding:10px 12px 8px}
-.pill{display:flex;align-items:center;gap:8px;flex:1;min-width:0}
-.dot{width:10px;height:10px;border-radius:50%;background:var(--faint);flex:none}
-.dot.ok{background:var(--ok);box-shadow:0 0 10px var(--ok)}
-.dot.busy{background:var(--warn);box-shadow:0 0 10px var(--warn);animation:blink 1s infinite}
-@keyframes blink{50%{opacity:.35}}
-.pill .t{font-family:var(--cond);font-size:16px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.pill .s{font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-family:var(--mono)}
-.rec{display:none;align-items:center;gap:6px;font-family:var(--mono);font-size:12px;color:var(--red)}
-.rec.on{display:flex}
-.rec i{width:9px;height:9px;border-radius:50%;background:var(--red);animation:blink 1s infinite}
-.btn{background:var(--panel2);border:1px solid var(--line);border-radius:12px;padding:10px 14px;font-size:15px;font-weight:600;white-space:nowrap}
-.btn.primary{background:var(--red);border-color:var(--red);color:#fff}
-.btn.ghost{background:transparent}
-.btn.small{padding:7px 11px;font-size:13px;border-radius:10px}
-.btn:active{transform:translateY(1px)}
-.btn:focus-visible,.tab:focus-visible{outline:2px solid var(--warn);outline-offset:2px}
-
-.alerts{display:flex;flex-direction:column;gap:6px;padding:0 12px}
-.alert{display:flex;align-items:center;gap:10px;border-radius:12px;padding:9px 12px;font-family:var(--cond);font-size:16px;font-weight:700}
-.alert.warn{background:#2a1c04;border:1px solid #6b4a08;color:var(--warn)}
-.alert.bad{background:#2c0806;border:1px solid #7a140d;color:#ff6b5e;animation:pulse 1s infinite}
-.alert small{font-family:var(--mono);font-size:11px;font-weight:400;color:var(--muted);margin-left:auto}
-@keyframes pulse{50%{background:#3d0b08}}
-
-.views{flex:1;min-height:0;position:relative;margin-top:8px}
-.view{position:absolute;inset:0;overflow-y:auto;padding:0 12px 14px;display:none}
-.view.on{display:block}
-
-.ov{display:grid;grid-template-columns:1fr;gap:10px}
-.dial{background:radial-gradient(120% 90% at 50% 70%,#1d0b09 0%,var(--panel) 60%);border:1px solid var(--line);border-radius:20px;padding:10px 10px 12px;position:relative}
-.dial canvas{display:block;width:100%;height:auto}
-.dialfoot{display:flex;justify-content:space-between;gap:8px;padding:0 6px;font-family:var(--mono);font-size:12px;color:var(--muted);flex-wrap:wrap}
-.dialfoot b{color:var(--text);font-weight:600}
-.dialfoot .pk b{color:var(--red)}
-.demo{position:absolute;top:10px;left:12px;font-size:11px;color:var(--warn);font-family:var(--mono)}
-.reset{position:absolute;top:8px;right:10px}
-
-.sect{font-family:var(--cond);font-size:13px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:14px 2px 6px}
-.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
-.tile{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:10px 12px 8px;min-width:0;display:flex;flex-direction:column;gap:2px;position:relative;overflow:hidden}
-.tile .lbl{font-family:var(--cond);font-size:13px;letter-spacing:.05em;text-transform:uppercase;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.tile .val{font-family:var(--cond);font-weight:700;font-size:32px;line-height:1.05;color:var(--text);font-variant-numeric:tabular-nums;white-space:nowrap}
-.tile .val small{font-size:14px;font-weight:600;color:var(--muted);margin-left:4px}
-.tile .sub{font-family:var(--mono);font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.tile svg{width:100%;height:22px;display:block;margin-top:2px}
-.tile svg polyline{fill:none;stroke:var(--red-soft);stroke-width:1.6;vector-effect:non-scaling-stroke}
-.tile svg polygon{fill:rgba(255,61,46,.10);stroke:none}
-.tile .src{position:absolute;bottom:6px;right:10px;font-family:var(--mono);font-size:10px;color:var(--faint)}
-.tile.empty .val{color:var(--faint)}
-.tile.empty svg{opacity:.25}
-.tile.warn{border-color:#5a3a06}
-.tile.warn .val{color:var(--warn)}
-.tile.bad{border-color:#7a140d}
-.tile.bad .val{color:var(--bad)}
-.tile.good .val{color:var(--ok)}
-.tile.est .lbl::after{content:" · odhad";color:var(--faint);text-transform:none;letter-spacing:0}
-
-.panel{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:12px;margin-top:10px}
-.panel h2{margin:0 0 6px;font-family:var(--cond);font-size:17px;display:flex;justify-content:space-between;align-items:center;gap:8px}
-.panel p{margin:0 0 10px;color:var(--muted);font-size:13px;line-height:1.45;max-width:62ch}
-.row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
-select,input{background:var(--panel2);color:var(--text);border:1px solid var(--line);border-radius:12px;padding:10px 12px;font-size:15px;font-family:var(--body);min-width:0}
-input{font-family:var(--mono);width:12em}
-.note{font-size:12px;color:var(--muted);margin-top:6px;font-family:var(--mono);line-height:1.5}
-
-/* charts */
-.chart{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:10px 10px 6px;margin-top:10px}
-.chart h3{margin:0 0 4px;font-family:var(--cond);font-size:15px;display:flex;gap:12px;align-items:center;flex-wrap:wrap}
-.chart h3 .k{font-family:var(--mono);font-size:11px;font-weight:400;color:var(--muted);display:flex;align-items:center;gap:5px}
-.chart h3 .k i{display:inline-block;width:14px;height:3px;border-radius:2px}
-.chart canvas{display:block;width:100%;height:150px}
-
-/* measurement */
-.big{font-family:var(--cond);font-weight:700;font-size:54px;line-height:1;font-variant-numeric:tabular-nums}
-.big small{font-size:18px;color:var(--muted);margin-left:6px}
-.stat{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px 14px;margin-top:8px}
-.stat div{display:flex;justify-content:space-between;gap:8px;border-bottom:1px solid #1d100e;padding:5px 0;font-size:14px}
-.stat div span{color:var(--muted)}
-.stat div b{font-family:var(--cond);font-size:17px;font-variant-numeric:tabular-nums;white-space:nowrap}
-.cyl{display:flex;flex-direction:column;gap:8px;margin-top:6px}
-.cyl .r{display:grid;grid-template-columns:6.2em 1fr 4.2em;align-items:center;gap:8px;font-size:13px}
-.cyl .bar{position:relative;height:16px;background:#1d100e;border-radius:8px}
-.cyl .bar::before{content:"";position:absolute;left:50%;top:-3px;bottom:-3px;width:1px;background:var(--faint)}
-.cyl .bar i{position:absolute;top:2px;bottom:2px;border-radius:6px;background:var(--ok)}
-.cyl .bar i.warn{background:var(--warn)} .cyl .bar i.bad{background:var(--bad)}
-.cyl .r b{font-family:var(--cond);font-size:16px;text-align:right;font-variant-numeric:tabular-nums}
-.chips{display:flex;gap:6px;flex-wrap:wrap}
-.chip{border:1px solid var(--line);background:var(--panel2);border-radius:999px;padding:7px 12px;font-size:14px;font-family:var(--cond);font-weight:600}
-.chip.on{background:var(--red);border-color:var(--red);color:#fff}
-.hist{font-family:var(--mono);font-size:12px;color:var(--muted);margin-top:8px;line-height:1.7}
-.hist b{color:var(--text)}
-
-/* groups */
-.gsec{background:var(--panel);border:1px solid var(--line);border-radius:14px;margin-top:10px;overflow:hidden}
-.gsec h3{margin:0;padding:10px 12px;font-family:var(--cond);font-size:15px;letter-spacing:.04em;display:flex;justify-content:space-between;border-bottom:1px solid var(--line)}
-.gsec h3 span{color:var(--muted);font-family:var(--mono);font-size:11px;font-weight:400}
-.gtab{width:100%;border-collapse:collapse;font-size:13px}
-.gtab td{padding:7px 12px;border-bottom:1px solid #1d100e}
-.gtab tr:last-child td{border-bottom:0}
-.gtab td.v{text-align:right;font-family:var(--cond);font-size:18px;font-weight:700;font-variant-numeric:tabular-nums;white-space:nowrap}
-.gtab td.v small{color:var(--muted);font-size:12px;font-weight:400}
-.gtab td.r{text-align:right;font-family:var(--mono);font-size:11px;color:var(--faint);white-space:nowrap;width:1%}
-#log{font-family:var(--mono);font-size:11.5px;line-height:1.5;white-space:pre-wrap;word-break:break-word;color:#cdbdb9;-webkit-user-select:text;user-select:text;margin:0}
-.switch{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 0;border-bottom:1px solid #1d100e;font-size:14px}
-.switch:last-child{border-bottom:0}
-
-.tabs{display:flex;gap:4px;padding:8px 8px 10px;border-top:1px solid var(--line);background:var(--bg)}
-.tab{flex:1;background:transparent;border:1px solid transparent;border-radius:12px;padding:10px 2px;font-family:var(--cond);font-size:14px;font-weight:600;color:var(--muted);letter-spacing:.02em;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.tab.on{background:var(--panel2);border-color:var(--line);color:var(--text)}
-
-@media (orientation:landscape) and (min-width:640px){
-  .ov{grid-template-columns:minmax(0,1fr) minmax(0,1.25fr);align-items:start}
-  .grid{grid-template-columns:repeat(3,minmax(0,1fr))}
-  .stat{grid-template-columns:repeat(3,minmax(0,1fr))}
-}
-@media (min-width:900px){ .grid{grid-template-columns:repeat(4,minmax(0,1fr))} }
-@media (prefers-reduced-motion:reduce){ .dot.busy,.rec i,.alert.bad{animation:none} }
-</style>
+<link rel="stylesheet" href="css/app.css">
 </head>
 <body>
-<div class="top">
+<header class="top">
   <div class="pill">
     <span class="dot" id="dot"></span>
     <div style="min-width:0">
-      <div class="t" id="statusText">Odpojeno</div>
-      <div class="s" id="ident">Kabel do OBD, zapalování zapnout</div>
+      <div class="t" id="stT">Odpojeno</div>
+      <div class="s" id="stS">Zapoj kabel a zapni zapalování</div>
     </div>
   </div>
-  <div class="rec" id="recBadge"><i></i><span id="recTime">0:00</span></div>
+  <div class="recb" id="recBadge"><i></i><span id="recTime">0:00</span></div>
   <button class="btn primary" id="btnConn">Připojit</button>
-</div>
-<div class="alerts" id="alerts"></div>
+</header>
+<div class="banner" id="banner" hidden></div>
 
-<div class="views">
-  <!-- OVERVIEW -->
-  <section class="view on" id="v-ov">
-    <div class="ov">
-      <div class="dial">
-        <span class="demo" id="demo" hidden>UKÁZKA · smyšlená data</span>
-        <button class="btn ghost small reset" id="btnPeak">Vynulovat max</button>
-        <canvas id="dial" width="700" height="560" aria-label="Plnicí tlak turba"></canvas>
-        <div class="dialfoot">
-          <span>požad. <b id="specTxt">–</b></span>
-          <span>rozdíl <b id="devTxt">–</b></span>
-          <span class="pk">max <b id="peakTxt">0.00</b></span>
-          <span>abs <b id="absTxt">–</b> mbar</span>
-        </div>
+<main>
+  <!-- JÍZDA -->
+  <section class="view on" id="v-drive">
+    <div class="pagebar">
+      <div class="pages" id="pageChips"></div>
+      <button class="ibtn" id="btnHud" aria-label="HUD na čelní sklo"></button>
+      <button class="ibtn" id="btnEdit" aria-label="Upravit stránku"></button>
+    </div>
+    <div class="pagebody" id="pageBody"></div>
+  </section>
+
+  <!-- GRAFY -->
+  <section class="view" id="v-charts">
+    <div class="pagebar">
+      <div class="chips" id="spanChips" style="flex:1">
+        <button class="chip" data-s="30">30 s</button><button class="chip" data-s="60">1 min</button><button class="chip" data-s="180">3 min</button>
       </div>
-      <div>
-        <div class="grid" id="tilesMain"></div>
-        <div class="sect">Teploty a přístroje</div>
-        <div class="grid" id="tilesTemp"></div>
-        <div class="sect">Další hodnoty</div>
-        <div class="grid" id="tilesMore"></div>
-      </div>
+      <button class="btn small" id="btnReplay">Přehrát jízdu</button>
+    </div>
+    <div class="scroll">
+      <div class="chart"><h4>Turbo <span class="k"><i style="background:#efe6e3"></i>požad.</span><span class="k"><i style="background:var(--red)"></i>skutečně</span><span class="k">bar</span></h4><canvas id="chBoost"></canvas></div>
+      <div class="chart"><h4>Vzduch MAF <span class="k"><i style="background:#efe6e3"></i>požad.</span><span class="k"><i style="background:var(--red)"></i>skutečně</span><span class="k">mg</span></h4><canvas id="chMaf"></canvas></div>
+      <div class="chart"><h4>Vstřik a směs <span class="k"><i style="background:var(--red)"></i>vstřik mg</span><span class="k"><i style="background:var(--blue)"></i>vzduch/palivo ÷2</span></h4><canvas id="chIq"></canvas></div>
+      <div class="chart"><h4>Otáčky a voda <span class="k"><i style="background:var(--red)"></i>otáčky ÷40</span><span class="k"><i style="background:var(--warn)"></i>voda °C</span></h4><canvas id="chRpm"></canvas></div>
     </div>
   </section>
 
-  <!-- CHARTS -->
-  <section class="view" id="v-ch">
-    <div class="row" style="margin-top:2px">
-      <div class="chips" id="span">
-        <button class="chip" data-s="30">30 s</button><button class="chip on" data-s="60">1 min</button><button class="chip" data-s="180">3 min</button>
-      </div>
-    </div>
-    <div class="chart"><h3>Turbo <span class="k"><i style="background:#efe6e3"></i>požadováno</span><span class="k"><i style="background:var(--red)"></i>skutečně</span><span class="k">bar přetlak</span></h3><canvas id="chBoost"></canvas></div>
-    <div class="chart"><h3>Vzduch MAF <span class="k"><i style="background:#efe6e3"></i>požadováno</span><span class="k"><i style="background:var(--red)"></i>skutečně</span><span class="k">mg/zdvih</span></h3><canvas id="chMaf"></canvas></div>
-    <div class="chart"><h3>Vstřik a poměr <span class="k"><i style="background:var(--red)"></i>vstřik mg</span><span class="k"><i style="background:var(--blue)"></i>vzduch/palivo</span></h3><canvas id="chIq"></canvas></div>
-    <div class="chart"><h3>Otáčky a teploty <span class="k"><i style="background:var(--red)"></i>otáčky</span><span class="k"><i style="background:var(--warn)"></i>voda °C</span><span class="k"><i style="background:var(--blue)"></i>olej °C</span></h3><canvas id="chRpm"></canvas></div>
+  <!-- TESTY -->
+  <section class="view" id="v-tests"><div class="subhead" id="testsHead" hidden></div><div class="scroll" id="testsBody"></div></section>
+
+  <!-- CESTA -->
+  <section class="view" id="v-trip">
+    <div class="pagebar"><div class="seg" id="tripSeg" style="flex:1"><button data-m="now" class="on">Teď</button><button data-m="hist">Historie</button></div></div>
+    <div class="scroll" id="tripBody"></div>
   </section>
 
-  <!-- MEASURE -->
-  <section class="view" id="v-me">
-    <div class="panel">
-      <h2>Zrychlení <span class="note" id="gpsState" style="margin:0">GPS vypnuta</span></h2>
-      <div class="chips" id="accModes">
-        <button class="chip on" data-m="0-100">0–100</button><button class="chip" data-m="60-100">60–100</button><button class="chip" data-m="80-120">80–120</button><button class="chip" data-m="0-60">0–60</button>
-      </div>
-      <div class="row" style="margin-top:12px;align-items:flex-end;justify-content:space-between">
-        <div><div class="big" id="accTime">–<small>s</small></div><div class="note" id="accState">Zapni GPS</div></div>
-        <div style="text-align:right"><div class="big" id="gpsSpeed" style="font-size:40px">–<small>km/h</small></div><div class="note" id="gpsAcc">&nbsp;</div></div>
-      </div>
-      <div class="row" style="margin-top:10px"><button class="btn" id="btnGps">Zapnout GPS</button><button class="btn ghost" id="btnAccReset">Nové měření</button></div>
-      <div class="hist" id="accHist"></div>
-      <p class="note" style="margin-top:8px">Rychlost bere z GPS telefonu, přesnost asi ±0,3 s. Měř jen na uzavřené ploše nebo kde je to legální a bezpečné, telefon měj v držáku.</p>
-    </div>
+  <!-- VÍCE -->
+  <section class="view" id="v-more"><div class="subhead" id="moreHead" hidden></div><div class="scroll" id="moreBody"></div></section>
+</main>
 
-    <div class="panel">
-      <h2>Klidný chod válců <button class="btn small" id="btnSmooth">Spustit test</button></h2>
-      <p>Na zahřátém motoru na volnoběh. Ukazuje, kolik jednotka přidává nebo ubírá palivo jednotlivým válcům. Do ±2 mg je v pořádku, nad ±3 mg ukazuje na vadný vstřikovač nebo kompresi.</p>
-      <div class="cyl" id="cyl"><div class="note">Spusť test, hodnoty se zobrazí tady.</div></div>
-    </div>
-
-    <div class="panel">
-      <h2>Jízda <button class="btn small ghost" id="btnTripReset">Vynulovat</button></h2>
-      <div class="stat" id="trip"></div>
-    </div>
-
-    <div class="panel">
-      <h2>Přístrojový panel <button class="btn small" id="btnCluster">Načíst teď</button></h2>
-      <p>Aplikace se občas na pár sekund přepne z motoru na přístroje a přečte teplotu oleje, palivo, kilometry a venkovní teplotu. Interval nastavíš v záložce Log.</p>
-      <div class="stat" id="clu"></div>
-      <div class="note" id="cluNote">Zatím nenačteno</div>
-    </div>
-  </section>
-
-  <!-- GROUPS -->
-  <section class="view" id="v-gr">
-    <div class="panel">
-      <h2>Co číst z motoru</h2>
-      <p>Čím méně skupin, tím rychleji se hodnoty obnovují.</p>
-      <div class="row">
-        <select id="mode" aria-label="Režim čtení">
-          <option value="11,1,11,3,11,1,11,3,11,7">Jízda (turbo, vzduch, vstřik, teploty)</option>
-          <option value="11">Jen turbo (nejrychlejší)</option>
-          <option value="1,2,3,4,7,8,10,11,12,13,14">Kompletní kontrola (všechny skupiny)</option>
-          <option value="custom">Vlastní skupiny</option>
-        </select>
-        <input id="custom" placeholder="např. 11,1,3,4" inputmode="numeric" aria-label="Vlastní skupiny">
-        <button class="btn" id="btnCustom">Použít</button>
-      </div>
-      <div class="note" id="planTxt"></div>
-    </div>
-    <div id="groups"></div>
-    <p class="note" style="margin-top:12px">Názvy polí jsou podle běžného rozložení TDI motorů a přístrojů VAG. Porovnej s VCDS-Lite, a pokud něco nesedí, napiš mi.</p>
-  </section>
-
-  <!-- LOG -->
-  <section class="view" id="v-log">
-    <div class="panel">
-      <h2>Nastavení</h2>
-      <div class="switch"><span>Zvuková upozornění</span><select id="optSound"><option value="1">Zapnuto</option><option value="0">Vypnuto</option></select></div>
-      <div class="switch"><span>Číst přístrojový panel</span><select id="optCluster"><option value="0">Jen tlačítkem</option><option value="60">Každou minutu</option><option value="120">Každé 2 minuty</option><option value="300" selected>Každých 5 minut</option></select></div>
-      <div class="switch"><span>GPS při spuštění</span><select id="optGps"><option value="0">Vypnuto</option><option value="1">Zapnout</option></select></div>
-    </div>
-    <div class="panel">
-      <h2>Záznam jízdy</h2>
-      <p>Ukládá všechny načtené hodnoty do CSV (Excel). Soubor se uloží do Stažené soubory / AudiBudiky, nebo ho rovnou pošli.</p>
-      <div class="row">
-        <button class="btn primary" id="btnRec">Spustit záznam</button>
-        <button class="btn" id="btnShareRec">Sdílet poslední záznam</button>
-      </div>
-      <div class="note" id="recNote">Žádný záznam</div>
-    </div>
-    <div class="panel">
-      <h2>Log komunikace</h2>
-      <div class="row" style="margin-bottom:10px">
-        <button class="btn" id="btnSaveLog">Uložit log</button>
-        <button class="btn" id="btnShareLog">Sdílet log</button>
-        <button class="btn ghost" id="btnClearLog">Vymazat</button>
-      </div>
-      <pre id="log"></pre>
-    </div>
-  </section>
+<div class="replay" id="replay" hidden>
+  <button class="ibtn" id="rpPlay" aria-label="Pauza"></button>
+  <span class="rt" id="rpTime">0:00</span>
+  <input type="range" id="rpSeek" min="0" max="1000" value="0" aria-label="Posun v záznamu">
+  <button class="chip" id="rpSpeed">×1</button>
+  <button class="ibtn" id="rpClose" aria-label="Ukončit přehrávání"></button>
 </div>
 
-<nav class="tabs" role="tablist">
-  <button class="tab on" data-v="v-ov" role="tab">Přehled</button>
-  <button class="tab" data-v="v-ch" role="tab">Grafy</button>
-  <button class="tab" data-v="v-me" role="tab">Měření</button>
-  <button class="tab" data-v="v-gr" role="tab">Skupiny</button>
-  <button class="tab" data-v="v-log" role="tab">Log</button>
+<nav class="nav" id="nav">
+  <button data-v="drive" class="on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 17a8 8 0 1 1 16 0"/><path d="M12 17l4-6"/><circle cx="12" cy="17" r="1.2" fill="currentColor"/></svg>Jízda</button>
+  <button data-v="charts"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 20h18"/><path d="M4 15l4-5 4 3 4-6 4 4"/></svg>Grafy</button>
+  <button data-v="tests"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 3h6"/><path d="M10 3v6l-5 9a2 2 0 0 0 1.8 3h10.4a2 2 0 0 0 1.8-3l-5-9V3"/><path d="M7.5 15h9"/></svg>Testy</button>
+  <button data-v="trip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 21l4-18"/><path d="M19 21l-4-18"/><path d="M12 6v2M12 11v2M12 16v2"/></svg>Cesta</button>
+  <button data-v="more"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="5" cy="12" r="1.4" fill="currentColor"/><circle cx="12" cy="12" r="1.4" fill="currentColor"/><circle cx="19" cy="12" r="1.4" fill="currentColor"/></svg>Více<span class="badge" id="navBadge" hidden>0</span></button>
 </nav>
 
-<script>
-(function(){
-  'use strict';
-  const $ = id => document.getElementById(id);
-  const A = window.Android || null;
-  const now = () => performance.now();
-  const store = {
-    get(k,d){ try{ const v=localStorage.getItem(k); return v==null?d:JSON.parse(v); }catch(_){ return d; } },
-    set(k,v){ try{ localStorage.setItem(k, JSON.stringify(v)); }catch(_){} }
-  };
-  const pad3 = n => String(n).padStart(3,'0');
-  const fmt = (v,d) => (v==null||!isFinite(v)) ? '–' : Number(v).toFixed(d);
+<div class="overlay focus" id="focus" hidden></div>
+<div class="overlay hud" id="hud" hidden></div>
+<div class="sheetbg" id="sheetBg" hidden><div class="sheet" id="sheet"></div></div>
+<div class="flash" id="flash"></div>
 
-  /* ---------------- names ---------------- */
-  const ENG = 1, CLU = 0x17;
-  const NAMES = {
-    1:{1:['Otáčky','Vstřik','Modulační píst','Teplota vody'],
-       2:['Otáčky','Plyn','Stav spínačů','Teplota vody'],
-       3:['Otáčky','MAF požadováno','MAF skutečně','EGR ventil'],
-       4:['Otáčky','Předvstřik požadovaný','Předvstřik skutečný','Ventil předvstřiku'],
-       7:['Teplota paliva','–','Teplota nasávaného vzduchu','Teplota vody'],
-       8:['Otáčky','Požadovaný vstřik','Limit podle otáček','Limit podle MAF'],
-       10:['Vzduch (MAF)','Atmosférický tlak','Tlak v sání','Plyn'],
-       11:['Otáčky','Turbo požadováno','Turbo skutečně','Ventil turba N75'],
-       13:['Klidný chod 1','Klidný chod 2','Klidný chod 3','Klidný chod 4'],
-       14:['Klidný chod 4','Klidný chod 5','Klidný chod 6','–']},
-    23:{1:['Rychlost','Otáčky','Tlak oleje','Čas'],
-        2:['Stav km','Palivo v nádrži','Plovák paliva','Venkovní teplota'],
-        3:['Teplota vody','Hladina oleje','Teplota oleje','–']}
-  };
-  const CLU_T = {7:'Rychlost',1:'Otáčky',37:'Tlak oleje',36:'Stav km',19:'Palivo v nádrži',12:'Plovák paliva',44:'Čas'};
-  const fname = (e,g,i,x) => {
-    if(e===CLU && x){ if(x.t===5) return g===2?'Venkovní teplota':(i===0?'Teplota vody':'Teplota oleje'); if(CLU_T[x.t]) return CLU_T[x.t]; }
-    return (NAMES[e] && NAMES[e][g] && NAMES[e][g][i]) || ('Pole '+(i+1)); };
-  let CYL = 6; // updated from the engine ident (R4, R5, V6 …)
-
-  /* ---------------- live metrics ---------------- */
-  // M[key] = {v, t(ms), src}
-  const M = {};
-  const setM = (k, v, src) => { if(v!=null && isFinite(v)) M[k] = {v, t:now(), src}; };
-  const fresh = (k, ms) => M[k] && (now()-M[k].t) < (ms||4000) ? M[k].v : null;
-  const any = (k) => M[k] ? M[k].v : null;
-  const S = { base:1000, shown:0, peak:0, gpsV:null, gpsT:0 };
-
-  const at = (f,i,types) => { const x=f[i]; return (x && x.v!=null && (!types || types.includes(x.t))) ? x.v : null; };
-  const firstType = (f,t) => { const x=f.find(x => x.t===t && x.v!=null); return x ? x.v : null; };
-
-  function ingest(e,g,f){
-    const src = (e===CLU?'P ':'')+pad3(g);
-    if(e===ENG){
-      const rpm=firstType(f,1); if(rpm!=null) setM('rpm',rpm,src);
-      const spd=firstType(f,7); if(spd!=null) setM('spdEng',spd,src);
-      const volt=f.find(x=>[6,21].includes(x.t) && x.v>8 && x.v<17); if(volt) setM('volt',volt.v,src);
-      if(g===1){ setM('iq',at(f,1),src); setM('cool',at(f,3,[5]),src); }
-      if(g===2){ setM('ped',at(f,1),src); setM('cool',at(f,3,[5]),src); }
-      if(g===3){ setM('mafSpec',at(f,1),src); setM('maf',at(f,2),src); setM('egr',at(f,3),src); }
-      if(g===4){ setM('timSpec',at(f,1),src); setM('tim',at(f,2),src); }
-      if(g===7){ setM('fuelT',at(f,0,[5]),src); setM('iat',at(f,2,[5]),src); setM('cool',at(f,3,[5]),src); }
-      if(g===8){ setM('iqReq',at(f,1),src); setM('limRpm',at(f,2),src); setM('limMaf',at(f,3),src); }
-      if(g===10){ const atm=at(f,1,[18]); if(atm!=null){ setM('atm',atm,src); if(atm>850&&atm<1080) S.base=atm; } setM('ped',at(f,3),src); }
-      if(g===11){
-        const p=f.filter(x=>x.t===18 && x.v!=null);
-        const spec = p.length>=2 ? p[0].v : null, act = p.length>=2 ? p[1].v : (p[0]?p[0].v:null);
-        const rpm=any('rpm')||0;
-        if(act!=null && rpm>0 && rpm<1100 && act>850 && act<1080 && !M.atm) S.base=Math.min(S.base, act);
-        setM('boostAbs',act,src); setM('boostSpecAbs',spec,src); setM('n75',at(f,3),src);
-      }
-      if(g===13||g===14) smoothIngest(g,f);
-    } else if(e===CLU){
-      if(g===1){ const sp=firstType(f,7); if(sp!=null) setM('spdClu',sp,src); }
-      if(g===2){ const km=firstType(f,36); if(km!=null) setM('odo',km,src);
-                 const fl=firstType(f,19); if(fl!=null) setM('fuelL',fl,src);
-                 const ot=firstType(f,5); if(ot!=null) setM('outT',ot,src); }
-      if(g===3){ // oil temp: 3rd field if it is a temperature, otherwise any plausible temp other than the first
-        let oil = at(f,2,[5]);
-        if(oil==null){ const temps=f.map((x,i)=>({x,i})).filter(o=>o.x.t===5 && o.i>0 && o.x.v>-40 && o.x.v<170); if(temps.length) oil=temps[0].x.v; }
-        setM('oilT',oil,src); setM('coolClu',at(f,0,[5]),src);
-      }
-      $('cluNote').textContent = 'Načteno '+new Date().toLocaleTimeString();
-    }
-  }
-
-  /* derived values */
-  const boostRel = () => { const a=fresh('boostAbs',3000); return a==null?null:(a-S.base)/1000; };
-  const boostSpecRel = () => { const a=fresh('boostSpecAbs',3000); return a==null?null:(a-S.base)/1000; };
-  function afr(){ const iq=fresh('iq',3000), maf=fresh('maf',3000); if(iq==null||maf==null||iq<3) return null; return maf/iq; }
-  function lph(){ const iq=fresh('iq',4000), rpm=fresh('rpm',3000); if(iq==null||rpm==null) return null; return Math.max(0, iq*rpm*CYL*30/1e6/0.835); }
-  function speed(){ if(S.gpsV!=null && now()-S.gpsT<3000) return S.gpsV; const e=fresh('spdEng',4000); if(e!=null) return e; return null; }
-  function torque(){ const iq=fresh('iq',4000); return iq==null?null:Math.max(0, iq*CYL*1.226); }
-  function power(){ const t=torque(), rpm=fresh('rpm',3000); return (t==null||rpm==null)?null:t*rpm/9549; }
-
-  /* ---------------- tiles ---------------- */
-  const T = [
-    // main
-    {g:'tilesMain', id:'rpm', lbl:'Otáčky', unit:'ot/min', d:0, get:()=>({v:any('rpm'), src:M.rpm&&M.rpm.src})},
-    {g:'tilesMain', id:'iq', lbl:'Vstřik paliva', unit:'mg', d:1, get:()=>({v:any('iq'), src:'001'})},
-    {g:'tilesMain', id:'maf', lbl:'Vzduch MAF', unit:'mg', d:0, get:()=>{ const v=any('maf'), s=any('mafSpec'); const dev = (v!=null&&s>300) ? (v/s-1)*100 : null; return {v, sub:'požadováno '+fmt(s,0)+(dev!=null?' ('+(dev>0?'+':'')+dev.toFixed(0)+' %)':''), src:'003'}; }},
-    {g:'tilesMain', id:'afr', lbl:'Vzduch / palivo', unit:':1', d:1, warn:v=>v<18, bad:v=>v<15.5, good:v=>v>=20,
-      get:()=>{ const v=afr(); return {v, sub: v==null?'potřebuje skupiny 001 a 003':'λ ≈ '+(v/14.5).toFixed(2)+(v<17?' · kouří':'')}; }},
-    {g:'tilesMain', id:'cons', lbl:'Spotřeba', unit:'l/h', d:1, est:true,
-      get:()=>{ const v=lph(), sp=speed(); return {v, sub: (v!=null&&sp>8)?(v/sp*100).toFixed(1)+' l/100 km':'l/100 km při jízdě'}; }},
-    {g:'tilesMain', id:'pwr', lbl:'Výkon', unit:'kW', d:0, est:true,
-      get:()=>{ const p=power(), t=torque(); return {v:p, sub: p==null?'ze vstřiku a otáček': fmt(p*1.36,0)+' k · '+fmt(t,0)+' Nm'}; }},
-    {g:'tilesMain', id:'n75', lbl:'Ventil N75', unit:'%', d:0, get:()=>({v:any('n75'), src:'011'})},
-    {g:'tilesMain', id:'egr', lbl:'EGR ventil', unit:'%', d:0, get:()=>({v:any('egr'), src:'003'})},
-    // temps + cluster
-    {g:'tilesTemp', id:'cool', lbl:'Teplota vody', unit:'°C', d:0, warn:v=>v>105||v<70, bad:v=>v>112, get:()=>({v:any('cool')!=null?any('cool'):any('coolClu'), src:M.cool&&M.cool.src})},
-    {g:'tilesTemp', id:'oil', lbl:'Teplota oleje', unit:'°C', d:0, warn:v=>v>125||v<60, bad:v=>v>140, get:()=>({v:any('oilT'), sub: M.oilT?'z přístrojů':'čte se z přístrojů', src:M.oilT&&M.oilT.src})},
-    {g:'tilesTemp', id:'fuelT', lbl:'Teplota paliva', unit:'°C', d:0, warn:v=>v>75, bad:v=>v>85, get:()=>({v:any('fuelT'), src:'007'})},
-    {g:'tilesTemp', id:'iat', lbl:'Teplota sání', unit:'°C', d:0, warn:v=>v>60, get:()=>({v:any('iat'), src:'007'})},
-    {g:'tilesTemp', id:'fuelL', lbl:'Palivo v nádrži', unit:'l', d:0, warn:v=>v<8, get:()=>{ const v=any('fuelL'), c=lph(), sp=speed(); const range=(v!=null&&c>0.3&&sp>20)? v/(c/sp) : null; return {v, sub: range?('dojezd ≈ '+range.toFixed(0)+' km'):'z přístrojů', src:M.fuelL&&M.fuelL.src}; }},
-    {g:'tilesTemp', id:'outT', lbl:'Venku', unit:'°C', d:0, warn:v=>v<=3, get:()=>({v:any('outT'), sub: (any('outT')!=null&&any('outT')<=3)?'pozor, náledí':'z přístrojů', src:M.outT&&M.outT.src})},
-    // more
-    {g:'tilesMore', id:'tim', lbl:'Předvstřik', unit:'°', d:1, get:()=>({v:any('tim'), sub:'požadovaný '+fmt(any('timSpec'),1), src:'004'})},
-    {g:'tilesMore', id:'ped', lbl:'Plyn', unit:'%', d:0, get:()=>({v:any('ped'), src:M.ped&&M.ped.src})},
-    {g:'tilesMore', id:'lim', lbl:'Omezení vstřiku', unit:'mg', d:1, get:()=>({v:any('iqReq'), sub:'limit '+fmt(any('limRpm'),1)+' / '+fmt(any('limMaf'),1), src:'008'})},
-    {g:'tilesMore', id:'atm', lbl:'Atmosf. tlak', unit:'mbar', d:0, get:()=>({v:any('atm'), sub:'pro výpočet přetlaku '+S.base.toFixed(0), src:'010'})},
-    {g:'tilesMore', id:'volt', lbl:'Napětí', unit:'V', d:1, warn:v=>v<12.2||v>14.9, get:()=>{ const v=any('volt'); return {v, sub: v==null?'':(v>13.4?'nabíjí':'nenabíjí'), src:M.volt&&M.volt.src}; }},
-    {g:'tilesMore', id:'spd', lbl:'Rychlost', unit:'km/h', d:0, get:()=>({v:speed(), sub: (S.gpsV!=null&&now()-S.gpsT<3000)?'GPS':'motor'})},
-    {g:'tilesMore', id:'odo', lbl:'Stav km', unit:'km', d:0, noHist:true, get:()=>({v:any('odo'), sub:'z přístrojů', src:M.odo&&M.odo.src})},
-    {g:'tilesMore', id:'rate', lbl:'Rychlost čtení', unit:'/s', d:1, noHist:true, get:()=>({v:readRate(), sub:lastRead})}
-  ];
-  const tileEl={}, hist={};
-  T.forEach(t=>{
-    const el=document.createElement('div'); el.className='tile empty'+(t.est?' est':''); el.id='t-'+t.id;
-    el.innerHTML='<span class="src"></span><span class="lbl">'+t.lbl+'</span><span class="val">–<small>'+t.unit+'</small></span><span class="sub">&nbsp;</span>'+(t.noHist?'':'<svg viewBox="0 0 100 22" preserveAspectRatio="none"><polygon points=""/><polyline points=""/></svg>');
-    $(t.g).appendChild(el); tileEl[t.id]=el; hist[t.id]=[];
-  });
-  function renderTiles(){
-    T.forEach(t=>{
-      const r=t.get()||{}, el=tileEl[t.id], v=r.v;
-      el.classList.remove('empty','warn','bad','good');
-      if(v==null||!isFinite(v)){ el.classList.add('empty'); el.querySelector('.val').innerHTML='–<small>'+t.unit+'</small>'; el.querySelector('.sub').textContent=r.sub||' '; return; }
-      if(t.bad&&t.bad(v)) el.classList.add('bad'); else if(t.warn&&t.warn(v)) el.classList.add('warn'); else if(t.good&&t.good(v)) el.classList.add('good');
-      el.querySelector('.val').innerHTML=fmt(v,t.d)+'<small>'+t.unit+'</small>';
-      el.querySelector('.sub').textContent=r.sub||' ';
-      el.querySelector('.src').textContent=r.src||'';
-      if(!t.noHist){
-        const h=hist[t.id]; if(!h.length || h[h.length-1]!==v){ h.push(v); if(h.length>60) h.shift(); }
-        let lo=Math.min(...h), hi=Math.max(...h); if(hi-lo<1e-6) hi=lo+1;
-        const pts=h.map((x,i)=>(h.length<2?0:i*100/(h.length-1)).toFixed(1)+','+(20-(x-lo)/(hi-lo)*18).toFixed(1));
-        el.querySelector('polyline').setAttribute('points',pts.join(' '));
-        if(pts.length>1) el.querySelector('polygon').setAttribute('points','0,22 '+pts.join(' ')+' 100,22');
-      }
-    });
-  }
-
-  /* ---------------- dial ---------------- */
-  const cv=$('dial'), ctx=cv.getContext('2d'); const MAXB=2.0;
-  function sizeDial(){ const w=cv.parentElement.clientWidth-20, dpr=window.devicePixelRatio||1, h=Math.round(w*0.80); cv.style.height=h+'px'; cv.width=Math.round(w*dpr); cv.height=Math.round(h*dpr); }
-  function drawDial(v){
-    const W=cv.width,H=cv.height,dpr=window.devicePixelRatio||1; ctx.clearRect(0,0,W,H);
-    const r=Math.min(W*0.34,H*0.46), cx=W/2, cy=H*0.62, ang=x=>Math.PI+Math.PI*Math.max(0,Math.min(1,x/MAXB));
-    ctx.lineCap='butt'; ctx.lineWidth=r*0.09; ctx.strokeStyle='#1f0f0d'; ctx.beginPath(); ctx.arc(cx,cy,r,Math.PI,2*Math.PI); ctx.stroke();
-    ctx.strokeStyle='#3a0e0a'; ctx.beginPath(); ctx.arc(cx,cy,r,ang(1.6),2*Math.PI); ctx.stroke();
-    const g=ctx.createLinearGradient(cx-r,0,cx+r,0); g.addColorStop(0,'#5a120c'); g.addColorStop(1,'#ff3d2e');
-    ctx.strokeStyle=g; ctx.beginPath(); ctx.arc(cx,cy,r,Math.PI,ang(Math.max(0.001,v))); ctx.stroke();
-    for(let i=0;i<=20;i++){ const t=i/10,a=ang(t),major=i%5===0,r1=r*1.08,r2=r*(major?1.18:1.13);
-      ctx.strokeStyle=major?'#8f807c':'#4d3f3c'; ctx.lineWidth=major?3*dpr:1.5*dpr; ctx.beginPath(); ctx.moveTo(cx+Math.cos(a)*r1,cy+Math.sin(a)*r1); ctx.lineTo(cx+Math.cos(a)*r2,cy+Math.sin(a)*r2); ctx.stroke();
-      if(major){ ctx.fillStyle='#8f807c'; ctx.font=(r*0.085)+'px sans-serif-condensed, sans-serif'; ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.fillText(t.toFixed(1),cx+Math.cos(a)*r*1.30,cy+Math.sin(a)*r*1.30); } }
-    const sp=boostSpecRel(); if(sp!=null){ const a=ang(sp); ctx.strokeStyle='#efe6e3'; ctx.lineWidth=3*dpr; ctx.beginPath(); ctx.moveTo(cx+Math.cos(a)*r*0.93,cy+Math.sin(a)*r*0.93); ctx.lineTo(cx+Math.cos(a)*r*1.07,cy+Math.sin(a)*r*1.07); ctx.stroke(); }
-    if(S.peak>0.02){ const a=ang(S.peak),rr=r*0.86,s=r*0.035; ctx.fillStyle='#ff3d2e'; ctx.beginPath(); ctx.moveTo(cx+Math.cos(a)*rr,cy+Math.sin(a)*rr); ctx.lineTo(cx+Math.cos(a-0.035)*(rr-s*2),cy+Math.sin(a-0.035)*(rr-s*2)); ctx.lineTo(cx+Math.cos(a+0.035)*(rr-s*2),cy+Math.sin(a+0.035)*(rr-s*2)); ctx.fill(); }
-    const an=ang(v); ctx.lineCap='round'; ctx.strokeStyle='#ff3d2e'; ctx.lineWidth=r*0.03; ctx.beginPath(); ctx.moveTo(cx-Math.cos(an)*r*0.08,cy-Math.sin(an)*r*0.08); ctx.lineTo(cx+Math.cos(an)*r*0.80,cy+Math.sin(an)*r*0.80); ctx.stroke();
-    ctx.fillStyle='#120a09'; ctx.strokeStyle='#ff3d2e'; ctx.lineWidth=r*0.025; ctx.beginPath(); ctx.arc(cx,cy,r*0.06,0,Math.PI*2); ctx.fill(); ctx.stroke();
-    ctx.textAlign='center'; ctx.textBaseline='alphabetic';
-    ctx.fillStyle='#efe6e3'; ctx.font='700 '+(r*0.36)+'px sans-serif-condensed, sans-serif'; ctx.fillText(v.toFixed(2),cx,cy+r*0.46);
-    ctx.fillStyle='#8f807c'; ctx.font=(r*0.085)+'px sans-serif-condensed, sans-serif'; ctx.fillText('TURBO · bar přetlak',cx,cy+r*0.62);
-  }
-  function dialFrame(){ const b=boostRel(); const target=b==null?0:Math.max(0,b); S.shown+=(target-S.shown)*0.2; if($('v-ov').classList.contains('on')) drawDial(S.shown); requestAnimationFrame(dialFrame); }
-  window.addEventListener('resize',()=>{ sizeDial(); sizeCharts(); }); sizeDial(); requestAnimationFrame(dialFrame);
-  $('btnPeak').onclick=()=>{ S.peak=0; $('peakTxt').textContent='0.00'; };
-  function updateDialText(){
-    const b=boostRel(), s=boostSpecRel();
-    $('specTxt').textContent = s==null?'–':s.toFixed(2);
-    $('devTxt').textContent = (b==null||s==null)?'–':((b-s>=0?'+':'')+(b-s).toFixed(2));
-    $('absTxt').textContent = fmt(fresh('boostAbs',3000),0);
-    if(b!=null && b>S.peak){ S.peak=b; $('peakTxt').textContent=b.toFixed(2); }
-  }
-
-  /* ---------------- alerts ---------------- */
-  const ALERTS = [
-    {id:'over', lvl:'bad', txt:'Přetlak turba', hold:1000, test:()=>{ const b=boostRel(), s=boostSpecRel(); return b!=null&&s!=null&&b>0.3&&b-s>0.15; }, info:()=>'+'+(boostRel()-boostSpecRel()).toFixed(2)+' bar'},
-    {id:'under', lvl:'warn', txt:'Nedotlak turba', hold:1500, test:()=>{ const b=boostRel(), s=boostSpecRel(), rpm=fresh('rpm',3000)||0; return b!=null&&s!=null&&rpm>2000&&s>0.5&&s-b>0.25; }, info:()=>(boostRel()-boostSpecRel()).toFixed(2)+' bar'},
-    {id:'afr', lvl:'warn', txt:'Bohatá směs (kouř)', hold:1000, test:()=>{ const a=afr(), iq=fresh('iq',3000)||0; return a!=null&&iq>15&&a<17; }, info:()=>afr().toFixed(1)+':1'},
-    {id:'afr2', lvl:'bad', txt:'Velmi bohatá směs', hold:800, test:()=>{ const a=afr(), iq=fresh('iq',3000)||0; return a!=null&&iq>15&&a<15; }, info:()=>afr().toFixed(1)+':1'},
-    {id:'maf', lvl:'warn', txt:'Málo vzduchu (MAF)', hold:2500, test:()=>{ const v=fresh('maf',3000), s=fresh('mafSpec',3000), rpm=fresh('rpm',3000)||0; return v!=null&&s>500&&rpm>1800&&v<s*0.85; }, info:()=>((fresh('maf')/fresh('mafSpec')-1)*100).toFixed(0)+' %'},
-    {id:'cool', lvl:'warn', txt:'Vysoká teplota vody', hold:2000, test:()=>(any('cool')||0)>105, info:()=>fmt(any('cool'),0)+' °C'},
-    {id:'cool2', lvl:'bad', txt:'Přehřívání motoru', hold:1000, test:()=>(any('cool')||0)>112, info:()=>fmt(any('cool'),0)+' °C'},
-    {id:'oil', lvl:'bad', txt:'Vysoká teplota oleje', hold:1000, test:()=>(any('oilT')||0)>135, info:()=>fmt(any('oilT'),0)+' °C'},
-    {id:'fuel', lvl:'warn', txt:'Horké palivo', hold:3000, test:()=>(any('fuelT')||0)>80, info:()=>fmt(any('fuelT'),0)+' °C'},
-    {id:'volt', lvl:'warn', txt:'Alternátor nenabíjí', hold:5000, test:()=>{ const v=fresh('volt',6000), rpm=fresh('rpm',3000)||0; return v!=null&&rpm>700&&v<12.8; }, info:()=>fmt(any('volt'),1)+' V'}
-  ];
-  const aState={};
-  let soundOn = store.get('sound',1)===1;
-  function checkAlerts(){
-    const t=now(); let html='';
-    ALERTS.forEach(a=>{
-      const st=aState[a.id]||(aState[a.id]={since:0,on:false,lastBeep:0});
-      let cond=false; try{ cond=!!a.test(); }catch(_){}
-      if(cond){ if(!st.since) st.since=t; if(t-st.since>=a.hold) st.on=true; } else { st.since=0; st.on=false; }
-      if(st.on){
-        let info=''; try{ info=a.info(); }catch(_){}
-        html+='<div class="alert '+a.lvl+'">⚠ '+a.txt+'<small>'+info+'</small></div>';
-        if(soundOn && A && A.beep && t-st.lastBeep>(a.lvl==='bad'?8000:30000)){ st.lastBeep=t; A.beep(a.lvl==='bad'?2:1); }
-      }
-    });
-    $('alerts').innerHTML=html;
-  }
-
-  /* ---------------- charts ---------------- */
-  const H=[]; // samples {t, b, bs, maf, mafS, iq, afr, rpm, cool, oil}
-  let spanS=store.get('span',60);
-  function sample(){
-    H.push({t:now(), b:boostRel(), bs:boostSpecRel(), maf:fresh('maf',2500), mafS:fresh('mafSpec',2500), iq:fresh('iq',2500), afr:afr(), rpm:fresh('rpm',2500), cool:any('cool'), oil:any('oilT')});
-    const cut=now()-185000; while(H.length && H[0].t<cut) H.shift();
-  }
-  const charts=['chBoost','chMaf','chIq','chRpm'].map(id=>$(id));
-  function sizeCharts(){ const dpr=window.devicePixelRatio||1; charts.forEach(c=>{ const w=c.clientWidth||300; c.width=Math.round(w*dpr); c.height=Math.round(150*dpr); }); }
-  function drawChart(c, series, lo, hi, fmtY){
-    const x=c.getContext('2d'), W=c.width, Hh=c.height, dpr=window.devicePixelRatio||1, padL=36*dpr, padB=14*dpr, padT=6*dpr;
-    x.clearRect(0,0,W,Hh);
-    const t1=now(), t0=t1-spanS*1000;
-    const X=t=>padL+(t-t0)/(t1-t0)*(W-padL-4*dpr), Y=v=>padT+(1-(v-lo)/(hi-lo))*(Hh-padT-padB);
-    x.strokeStyle='#241311'; x.lineWidth=1; x.fillStyle='#8f807c'; x.font=(10*dpr)+'px monospace'; x.textAlign='right'; x.textBaseline='middle';
-    for(let i=0;i<=4;i++){ const v=lo+(hi-lo)*i/4, y=Y(v); x.beginPath(); x.moveTo(padL,y); x.lineTo(W,y); x.stroke(); x.fillText(fmtY(v), padL-4*dpr, y); }
-    x.textAlign='center'; x.textBaseline='bottom';
-    for(let s=0;s<=spanS;s+=spanS/3){ x.fillText('-'+Math.round(spanS-s)+' s', X(t0+s*1000), Hh); }
-    series.forEach(sr=>{
-      x.strokeStyle=sr.color; x.lineWidth=(sr.w||2)*dpr; x.beginPath(); let pen=false;
-      H.forEach(p=>{ if(p.t<t0) return; const v=sr.get(p); if(v==null||!isFinite(v)){ pen=false; return; } const vv=Math.max(lo,Math.min(hi,sr.scale?sr.scale(v):v)); if(!pen){ x.moveTo(X(p.t),Y(vv)); pen=true; } else x.lineTo(X(p.t),Y(vv)); });
-      x.stroke();
-    });
-  }
-  function drawCharts(){
-    if(!$('v-ch').classList.contains('on')) return;
-    const red='#ff3d2e', white='#efe6e3', blue='#6aa8ff', amber='#ffb01f';
-    drawChart(charts[0], [{get:p=>p.bs,color:white,w:1.5},{get:p=>p.b,color:red}], 0, 2.0, v=>v.toFixed(1));
-    const mx=Math.max(1000, ...H.map(p=>Math.max(p.maf||0,p.mafS||0)))*1.05;
-    drawChart(charts[1], [{get:p=>p.mafS,color:white,w:1.5},{get:p=>p.maf,color:red}], 0, mx, v=>v.toFixed(0));
-    drawChart(charts[2], [{get:p=>p.iq,color:red},{get:p=>p.afr,color:blue,scale:v=>v*2}], 0, 70, v=>v.toFixed(0));
-    drawChart(charts[3], [{get:p=>p.rpm,color:red,scale:v=>v/40},{get:p=>p.cool,color:amber},{get:p=>p.oil,color:blue}], 0, 130, v=>v.toFixed(0));
-  }
-  document.querySelectorAll('#span .chip').forEach(b=>b.onclick=()=>{ spanS=+b.dataset.s; store.set('span',spanS); document.querySelectorAll('#span .chip').forEach(x=>x.classList.toggle('on',x===b)); });
-  document.querySelectorAll('#span .chip').forEach(b=>b.classList.toggle('on', +b.dataset.s===spanS));
-
-  /* ---------------- trip stats ---------------- */
-  let trip = {t0:Date.now(), dist:0, fuel:0, maxB:0, maxRpm:0, maxIq:0, maxSpd:0, maxCool:0, maxOil:0, maxFuelT:0, minAfr:null, last:now()};
-  function tripTick(){
-    const t=now(), dt=(t-trip.last)/1000; trip.last=t; if(dt<=0||dt>5) return;
-    const sp=speed(); if(sp!=null&&sp>1) trip.dist+=sp*dt/3600;
-    const c=lph(); if(c!=null) trip.fuel+=c*dt/3600;
-    const b=boostRel(); if(b!=null) trip.maxB=Math.max(trip.maxB,b);
-    trip.maxRpm=Math.max(trip.maxRpm,fresh('rpm',3000)||0); trip.maxIq=Math.max(trip.maxIq,fresh('iq',3000)||0);
-    trip.maxSpd=Math.max(trip.maxSpd,sp||0); trip.maxCool=Math.max(trip.maxCool,any('cool')||0); trip.maxOil=Math.max(trip.maxOil,any('oilT')||0); trip.maxFuelT=Math.max(trip.maxFuelT,any('fuelT')||0);
-    const a=afr(), iq=fresh('iq',3000)||0; if(a!=null&&iq>15) trip.minAfr = trip.minAfr==null?a:Math.min(trip.minAfr,a);
-  }
-  function renderTrip(){
-    const min=(Date.now()-trip.t0)/60000, avg = trip.dist>0.5 ? trip.fuel/trip.dist*100 : null;
-    const rows=[['Doba',Math.floor(min/60)+' h '+Math.floor(min%60)+' min'],['Ujeto',trip.dist.toFixed(1)+' km'],['Spotřebováno ≈',trip.fuel.toFixed(2)+' l'],['Průměr ≈',avg==null?'–':avg.toFixed(1)+' l/100 km'],
-      ['Max turbo',trip.maxB.toFixed(2)+' bar'],['Max otáčky',trip.maxRpm.toFixed(0)],['Max vstřik',trip.maxIq.toFixed(1)+' mg'],['Nejbohatší směs',trip.minAfr==null?'–':trip.minAfr.toFixed(1)+':1'],
-      ['Max rychlost',trip.maxSpd.toFixed(0)+' km/h'],['Max voda',trip.maxCool?trip.maxCool.toFixed(0)+' °C':'–'],['Max olej',trip.maxOil?trip.maxOil.toFixed(0)+' °C':'–'],['Max palivo',trip.maxFuelT?trip.maxFuelT.toFixed(0)+' °C':'–']];
-    $('trip').innerHTML=rows.map(r=>'<div><span>'+r[0]+'</span><b>'+r[1]+'</b></div>').join('');
-    const cl=[['Teplota oleje',fmt(any('oilT'),0)+' °C'],['Palivo',fmt(any('fuelL'),0)+' l'],['Venku',fmt(any('outT'),0)+' °C'],['Stav km',fmt(any('odo'),0)+' km'],['Voda (přístroje)',fmt(any('coolClu'),0)+' °C'],['Rychlost (přístroje)',fmt(any('spdClu'),0)+' km/h']];
-    $('clu').innerHTML=cl.map(r=>'<div><span>'+r[0]+'</span><b>'+r[1]+'</b></div>').join('');
-  }
-  $('btnTripReset').onclick=()=>{ trip={t0:Date.now(),dist:0,fuel:0,maxB:0,maxRpm:0,maxIq:0,maxSpd:0,maxCool:0,maxOil:0,maxFuelT:0,minAfr:null,last:now()}; renderTrip(); };
-
-  /* ---------------- acceleration (GPS) ---------------- */
-  let accMode=store.get('accMode','0-100'), acc={st:'idle'}, lastFix=null;
-  const accBest=store.get('accBest',{}), accLast=store.get('accLast',{});
-  function modeRange(){ const [a,b]=accMode.split('-').map(Number); return {a,b}; }
-  function accReset(){ acc={st:'idle'}; $('accTime').innerHTML='–<small>s</small>'; accUpdateState(); }
-  function accUpdateState(){
-    const {a,b}=modeRange(); let t='';
-    if(S.gpsV==null) t='Zapni GPS a počkej na signál';
-    else if(acc.st==='idle') t = a===0 ? 'Zastav (0 km/h), pak se rozjeď' : 'Zpomal pod '+(a-5)+' km/h';
-    else if(acc.st==='armed') t = a===0 ? 'Připraveno, rozjeď se' : 'Připraveno, zrychli přes '+a+' km/h';
-    else if(acc.st==='run') t='Měřím… cíl '+b+' km/h';
-    else if(acc.st==='done') t='Hotovo';
-    $('accState').textContent=t;
-    const best=accBest[accMode], last=accLast[accMode]||[];
-    $('accHist').innerHTML='Nejlepší '+accMode+': <b>'+(best?best.toFixed(2)+' s':'–')+'</b>'+(last.length?' · poslední: '+last.slice(-5).map(x=>x.toFixed(2)).join(', '):'');
-  }
-  function accFix(v,t){
-    const {a,b}=modeRange(); const prev=lastFix; lastFix={v,t};
-    const cross=(lvl)=> (prev && prev.v<lvl && v>=lvl) ? prev.t+(lvl-prev.v)/(v-prev.v)*(t-prev.t) : null;
-    if(acc.st==='idle'||acc.st==='done'){ if((a===0 && v<1.5) || (a>0 && v<a-5)){ acc={st:'armed'}; } }
-    else if(acc.st==='armed'){
-      if(a===0){ const c=cross(2); if(c!=null){ acc={st:'run', t0:c}; } }
-      else { const c=cross(a); if(c!=null) acc={st:'run', t0:c}; }
-    } else if(acc.st==='run'){
-      $('accTime').innerHTML=((t-acc.t0)/1000).toFixed(1)+'<small>s</small>';
-      if((a===0 && v<1) || (a>0 && v<a-5)){ acc={st:'armed'}; }
-      const c=cross(b);
-      if(c!=null){ const res=(c-acc.t0)/1000; acc={st:'done'}; $('accTime').innerHTML=res.toFixed(2)+'<small>s</small>';
-        const l=accLast[accMode]||[]; l.push(res); accLast[accMode]=l.slice(-10); if(!accBest[accMode]||res<accBest[accMode]) accBest[accMode]=res;
-        store.set('accBest',accBest); store.set('accLast',accLast); if(soundOn&&A&&A.beep) A.beep(1); }
-    }
-    accUpdateState();
-  }
-  document.querySelectorAll('#accModes .chip').forEach(b=>{ b.classList.toggle('on',b.dataset.m===accMode); b.onclick=()=>{ accMode=b.dataset.m; store.set('accMode',accMode); document.querySelectorAll('#accModes .chip').forEach(x=>x.classList.toggle('on',x===b)); accReset(); }; });
-  $('btnAccReset').onclick=accReset;
-  $('btnGps').onclick=()=>{ if(A&&A.gpsStart) A.gpsStart(); };
-  window.onGps = d => {
-    if(d.v==null) return; S.gpsV=d.v; S.gpsT=now();
-    $('gpsSpeed').innerHTML=d.v.toFixed(0)+'<small>km/h</small>'; $('gpsAcc').textContent='přesnost '+(d.acc!=null?d.acc.toFixed(0)+' m':'?');
-    $('gpsState').textContent='GPS OK'; accFix(d.v, d.t);
-  };
-  window.onGpsState = m => { $('gpsState').textContent=m; };
-
-  /* ---------------- smooth running ---------------- */
-  let smoothOn=false, savedPlan=null; const smooth={};
-  function smoothIngest(g,f){
-    f.forEach((x,i)=>{ if(x.t===1||x.v==null) return; smooth[g+'/'+(i+1)]={v:x.v,u:x.u,name:fname(ENG,g,i)}; });
-    const keys=Object.keys(smooth).sort((a,b)=>{ const [ga,ia]=a.split('/').map(Number),[gb,ib]=b.split('/').map(Number); return ga-gb||ia-ib; });
-    $('cyl').innerHTML=keys.map((k,idx)=>{ const o=smooth[k], v=o.v, w=Math.min(50,Math.abs(v)/4*50), cls=Math.abs(v)>3?'bad':Math.abs(v)>2?'warn':'';
-      const style = v>=0 ? 'left:50%;width:'+w+'%' : 'right:50%;width:'+w+'%';
-      return '<div class="r"><span><b style="font-size:17px">#'+(idx+1)+'</b> <span class="note" style="margin:0">'+pad3(+k.split('/')[0])+'/'+k.split('/')[1]+'</span></span><div class="bar"><i class="'+cls+'" style="'+style+'"></i></div><b>'+(v>0?'+':'')+v.toFixed(2)+'</b></div>'; }).join('');
-  }
-  $('btnSmooth').onclick=()=>{
-    if(!smoothOn){ smoothOn=true; savedPlan=currentPlan; A&&A.setPlan(CYL<=4?'13':'13,14'); A&&A.setClusterPeriod(0); $('btnSmooth').textContent='Ukončit test'; $('btnSmooth').classList.add('primary'); }
-    else { smoothOn=false; applyPlan(savedPlan||$('mode').value); applyCluster(); $('btnSmooth').textContent='Spustit test'; $('btnSmooth').classList.remove('primary'); }
-  };
-
-  /* ---------------- groups view ---------------- */
-  const groups={};
-  function renderGroups(){
-    const ks=Object.keys(groups).sort((a,b)=>{ const [ea,ga]=a.split('-').map(Number),[eb,gb]=b.split('-').map(Number); return ea-eb||ga-gb; });
-    $('groups').innerHTML = ks.map(k=>{ const [e,g]=k.split('-').map(Number), G=groups[k], age=((Date.now()-G.t)/1000).toFixed(0);
-      return '<div class="gsec"><h3>'+(e===CLU?'Přístroje ':'Motor ')+pad3(g)+'<span>před '+age+' s · '+G.ms+' ms</span></h3><table class="gtab">'+
-        G.f.map((x,i)=>'<tr><td>'+fname(e,g,i,x)+'</td><td class="v">'+(x.v!=null?(Math.abs(x.v)<10?x.v.toFixed(2):Math.abs(x.v)<100?x.v.toFixed(1):x.v.toFixed(0))+' <small>'+x.u+'</small>':x.s)+'</td><td class="r">t'+x.t+' '+x.a+'/'+x.b+'</td></tr>').join('')+'</table></div>'; }).join('')
-      || '<div class="panel"><p>Zatím žádná data. Připoj se k autu.</p></div>';
-  }
-
-  /* ---------------- incoming ---------------- */
-  let reads=[], lastRead='';
-  function readRate(){ const t=now(); reads=reads.filter(x=>t-x<4000); return reads.length? reads.length/4 : null; }
-  window.onGroup = d => {
-    const e=d.e||ENG, g=d.g, f=d.f||[];
-    groups[e+'-'+g]={f,t:Date.now(),ms:d.ms};
-    if(e===ENG){ reads.push(now()); lastRead='poslední '+pad3(g)+' · '+d.ms+' ms'; }
-    ingest(e,g,f);
-  };
-  const busyRe=/Probouz|zkouším|Povol|Čtu/;
-  window.onStatus = s => {
-    $('statusText').textContent=s.text;
-    $('dot').className='dot '+(busyRe.test(s.text)?'busy':(s.ok?'ok':''));
-    const active = s.ok || /Probouz|zkouším|Čtu/.test(s.text);
-    $('btnConn').textContent = active?'Odpojit':'Připojit'; $('btnConn').classList.toggle('primary',!active);
-  };
-  window.onIdent = t => { $('ident').textContent = t || 'Řídicí jednotka motoru';
-    const m=/\b[RV]\s?(\d{1,2})\b/.exec(t||''); if(m){ const c=+m[1]; if(c>=3&&c<=12) CYL=c; } };
-  window.onClusterIdent = t => { $('cluNote').textContent='Panel: '+t; };
-  const logLines=[];
-  window.onLog = m => { logLines.push(new Date().toTimeString().slice(0,8)+'  '+m); if(logLines.length>3000) logLines.shift(); if($('v-log').classList.contains('on')) $('log').textContent=logLines.slice(-300).reverse().join('\n'); };
-
-  /* ---------------- controls ---------------- */
-  document.querySelectorAll('.tab').forEach(b=>b.onclick=()=>{
-    document.querySelectorAll('.tab').forEach(x=>x.classList.toggle('on',x===b));
-    document.querySelectorAll('.view').forEach(v=>v.classList.toggle('on',v.id===b.dataset.v));
-    if(b.dataset.v==='v-ov') setTimeout(sizeDial,0);
-    if(b.dataset.v==='v-ch') setTimeout(()=>{ sizeCharts(); drawCharts(); },0);
-    if(b.dataset.v==='v-gr') renderGroups();
-    if(b.dataset.v==='v-log') $('log').textContent=logLines.slice(-300).reverse().join('\n');
-    if(b.dataset.v==='v-me'){ renderTrip(); accUpdateState(); }
-  });
-  $('btnConn').onclick=()=>{ if(!A) return; if($('btnConn').textContent==='Odpojit') A.disconnect(); else A.connect(); };
-  let currentPlan='';
-  function applyPlan(v){
-    const list=String(v).split(/[ ,;]+/).map(Number).filter(n=>n>=0&&n<=255); if(!list.length) return;
-    currentPlan=v; $('planTxt').textContent='Čtu: '+[...new Set(list)].map(pad3).join(', ');
-    store.set('plan',v); A&&A.setPlan(v); applyCluster();
-  }
-  function applyCluster(){ const sec=+$('optCluster').value; const turboOnly = currentPlan==='11'; A&&A.setClusterPeriod((smoothOn||turboOnly)?0:sec); }
-  $('mode').onchange=e=>{ if(e.target.value!=='custom') applyPlan(e.target.value); else $('custom').focus(); };
-  $('btnCustom').onclick=()=>{ $('mode').value='custom'; applyPlan($('custom').value); };
-  $('btnCluster').onclick=()=>{ if(A&&A.readClusterNow){ A.readClusterNow(); $('cluNote').textContent='Čtu přístroje… (motor se na pár sekund přeruší)'; } };
-  $('optSound').value=String(store.get('sound',1)); $('optSound').onchange=e=>{ soundOn=e.target.value==='1'; store.set('sound',soundOn?1:0); if(soundOn&&A&&A.beep) A.beep(1); };
-  $('optCluster').value=String(store.get('cluster',300)); $('optCluster').onchange=e=>{ store.set('cluster',+e.target.value); applyCluster(); };
-  $('optGps').value=String(store.get('gps',0)); $('optGps').onchange=e=>{ store.set('gps',+e.target.value); if(e.target.value==='1'&&A&&A.gpsStart) A.gpsStart(); };
-  (function initPlan(){ const p=store.get('plan',null); if(p){ const o=[...$('mode').options].find(o=>o.value===p); if(o) $('mode').value=p; else { $('mode').value='custom'; $('custom').value=p; } applyPlan(p); } else applyPlan($('mode').value); })();
-  if(store.get('gps',0)===1 && A && A.gpsStart) A.gpsStart();
-
-  let recStart=null, recTimer=null;
-  window.onRec = s => {
-    if(s.on){ recStart=Date.now(); $('recBadge').classList.add('on'); $('btnRec').textContent='Zastavit záznam'; $('recNote').textContent='Nahrávám do '+s.name;
-      clearInterval(recTimer); recTimer=setInterval(()=>{ const t=Math.floor((Date.now()-recStart)/1000); $('recTime').textContent=Math.floor(t/60)+':'+String(t%60).padStart(2,'0'); },1000); }
-    else { $('recBadge').classList.remove('on'); $('btnRec').textContent='Spustit záznam'; clearInterval(recTimer); $('recNote').textContent=s.msg||'Záznam ukončen'; }
-  };
-  $('btnRec').onclick=()=>{ if(!A) return; if($('recBadge').classList.contains('on')) A.recStop(); else A.recStart(); };
-  $('btnShareRec').onclick=()=>{ A&&A.shareLastRec(); };
-  $('btnSaveLog').onclick=()=>{ if(A) onLog(A.saveText('log',logLines.join('\n'))); };
-  $('btnShareLog').onclick=()=>{ A&&A.shareText('log',logLines.join('\n')); };
-  $('btnClearLog').onclick=()=>{ logLines.length=0; $('log').textContent=''; };
-  if(A&&A.version) onLog('Audi Budíky verze '+A.version());
-
-  /* ---------------- ticks ---------------- */
-  setInterval(()=>{ renderTiles(); updateDialText(); checkAlerts(); sample(); tripTick(); drawCharts(); if($('v-me').classList.contains('on')) renderTrip(); if($('v-gr').classList.contains('on')) renderGroups(); }, 250);
-  sizeCharts(); renderTiles(); renderTrip(); accUpdateState();
-
-  /* ---------------- demo outside the app ---------------- */
-  if(!A){
-    $('demo').hidden=false; onStatus({text:'Ukázka bez auta',ok:true}); onIdent('8E0907401T  2.5l V6 TDI');
-    let t=0;
-    onGroup({e:CLU,g:2,ms:200,f:[{t:36,v:337019,u:'km',a:0,b:0},{t:19,v:41,u:'l',a:0,b:0},{t:12,v:0.12,u:'Ω',a:0,b:0},{t:5,v:6.5,u:'°C',a:0,b:0}]});
-    onGroup({e:CLU,g:3,ms:200,f:[{t:5,v:90,u:'°C',a:0,b:0},{t:16,v:null,u:'',s:'OK',a:0,b:0},{t:5,v:96,u:'°C',a:0,b:0},{t:0,v:null,u:'',s:'',a:0,b:0}]});
-    setInterval(()=>{ t+=0.25; const load=Math.max(0,Math.sin(t/3)); const rpm=1700+1500*(0.5+0.5*Math.sin(t/3)), b=1000+1250*load;
-      onGroup({g:11,ms:170,f:[{t:1,v:rpm,u:'ot/min',a:0,b:0},{t:18,v:b+60,u:'mbar',a:0,b:0},{t:18,v:b,u:'mbar',a:0,b:0},{t:33,v:58+10*Math.sin(t),u:'%',a:0,b:0}]});
-      const k=Math.round(t*4)%5;
-      if(k===1) onGroup({g:1,ms:180,f:[{t:1,v:rpm,u:'ot/min',a:0,b:0},{t:39,v:8+30*load,u:'mg/zdvih',a:0,b:0},{t:6,v:1.6,u:'V',a:0,b:0},{t:5,v:89.4,u:'°C',a:0,b:0}]});
-      if(k===3) onGroup({g:3,ms:175,f:[{t:1,v:rpm,u:'ot/min',a:0,b:0},{t:39,v:420+600*load,u:'mg/zdvih',a:0,b:0},{t:39,v:410+590*load,u:'mg/zdvih',a:0,b:0},{t:23,v:8,u:'%',a:0,b:0}]});
-      if(k===4) onGroup({g:7,ms:178,f:[{t:5,v:41.5,u:'°C',a:0,b:0},{t:5,v:0,u:'°C',a:0,b:0},{t:5,v:24.8,u:'°C',a:0,b:0},{t:5,v:89.6,u:'°C',a:0,b:0}]});
-      window.onGps({v:Math.max(0,60+40*Math.sin(t/3)),acc:4,t:Date.now()});
-    },250);
-    onGroup({g:13,ms:180,f:[{t:39,v:0.8,u:'mg/zdvih',a:0,b:0},{t:39,v:-1.4,u:'mg/zdvih',a:0,b:0},{t:39,v:2.6,u:'mg/zdvih',a:0,b:0},{t:39,v:-0.3,u:'mg/zdvih',a:0,b:0}]});
-    onGroup({g:14,ms:180,f:[{t:39,v:-0.3,u:'mg/zdvih',a:0,b:0},{t:39,v:-1.1,u:'mg/zdvih',a:0,b:0},{t:39,v:0.5,u:'mg/zdvih',a:0,b:0},{t:1,v:820,u:'ot/min',a:0,b:0}]});
-  }
-})();
-</script>
+<script src="js/demo.js"></script>
+<script src="js/core.js"></script>
+<script src="js/drive.js"></script>
+<script src="js/charts.js"></script>
+<script src="js/tests.js"></script>
+<script src="js/trip.js"></script>
+<script src="js/more.js"></script>
+<script src="js/main.js"></script>
 </body>
 </html>
