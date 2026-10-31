@@ -25,6 +25,7 @@ const FLT = { eng: null, clu: null, busy: null };
 let REC = { on: false, start: 0, name: '', msg: '' };
 
 const MENU = [
+  ['check', 'Kontrola spojení', 'Krok po kroku: kabel, přístup, motor, data, GPS'],
   ['faults', 'Chybové kódy', 'Přečíst chyby motoru a přístrojů (jen čtení)'],
   ['recs', 'Záznamy jízd', 'Nahrávání do CSV, sdílení, přehrání'],
   ['settings', 'Nastavení', 'Auto, cena nafty, GPS, panel'],
@@ -54,7 +55,7 @@ function renderMore(){
   head.hidden = false;
   head.innerHTML = '<button class="back" id="mBack">' + ICON.back + 'Více</button><h2>' + title + '</h2>';
   $('mBack').onclick = () => openMore(null);
-  ({ faults: renderFaults, recs: renderRecs, settings: renderSettings, sounds: renderSounds, groups: renderGroups, log: renderLog, about: renderAbout })[moreSub]();
+  ({ check: renderCheck, faults: renderFaults, recs: renderRecs, settings: renderSettings, sounds: renderSounds, groups: renderGroups, log: renderLog, about: renderAbout })[moreSub]();
 }
 
 /* ---------- fault codes ---------- */
@@ -78,8 +79,15 @@ function renderFaults(){
     '<div class="card"><h3>Přístroje <button class="btn small" id="fClu"' + (live && !FLT.busy ? '' : ' disabled') + '>' + (FLT.busy === 'clu' ? 'Čtu…' : 'Přečíst') + '</button></h3>' + faultBlock('Přístroje', FLT.clu) +
     '<p class="note" style="margin:6px 0 0">Čtení přístrojů motor přeruší asi na 5 s.</p></div>' +
     '<p class="note" style="margin-top:12px">Jen čtení – aplikace nic nemaže ani nemění. Mazání chyb udělej ve VCDS-Lite.' + (live ? '' : ' Nejdřív se připoj k autu.') + '</p>';
-  $('fEng').onclick = () => { if (A && A.readFaults) { FLT.busy = 'eng'; A.readFaults(ENG); renderFaults(); setTimeout(() => { if (FLT.busy === 'eng') { FLT.busy = null; FLT.eng = { t: Date.now(), err: 'jednotka neodpověděla včas' }; if (moreSub === 'faults') renderFaults(); } }, 15000); } };
-  $('fClu').onclick = () => { if (A && A.readFaults) { FLT.busy = 'clu'; A.readFaults(CLU); renderFaults(); setTimeout(() => { if (FLT.busy === 'clu') { FLT.busy = null; FLT.clu = { t: Date.now(), err: 'panel neodpověděl včas' }; if (moreSub === 'faults') renderFaults(); } }, 25000); } };
+  $('fEng').onclick = () => readFaultsNow(ENG);
+  $('fClu').onclick = () => readFaultsNow(CLU);
+}
+function readFaultsNow(unit){
+  if (!A || !A.readFaults || FLT.busy) return;
+  const key = unit === CLU ? 'clu' : 'eng';
+  FLT.busy = key; A.readFaults(unit);
+  if (curView === 'more' && moreSub === 'faults') renderFaults();
+  setTimeout(() => { if (FLT.busy === key) { FLT.busy = null; FLT[key] = { t: Date.now(), err: unit === CLU ? 'panel neodpověděl včas' : 'jednotka neodpověděla včas' }; if (curView === 'more' && moreSub === 'faults') renderFaults(); } }, unit === CLU ? 25000 : 15000);
 }
 
 /* ---------- recordings ---------- */
@@ -108,7 +116,8 @@ function renderRecs(){
 function togRow(id, title, sub, on){ return '<div class="switch"><span class="sw-t">' + title + (sub ? '<small>' + sub + '</small>' : '') + '</span><button class="tog' + (on ? ' on' : '') + '" id="' + id + '" aria-label="' + title + '"></button></div>'; }
 function numRow(id, title, sub, val, step){ return '<div class="switch"><span class="sw-t">' + title + (sub ? '<small>' + sub + '</small>' : '') + '</span><input class="num-in" id="' + id + '" type="number" inputmode="decimal" step="' + step + '" value="' + val + '"></div>'; }
 function renderSettings(){
-  $('moreBody').innerHTML = '<div class="lbl2">Auto</div><div class="card">' +
+  $('moreBody').innerHTML = '<div class="lbl2">Vzhled</div><div class="card"><div class="seg" id="sTheme"><button data-t="moro">Moro modrá (LZ5J)</button><button data-t="black">Černá</button></div></div>' +
+    '<div class="lbl2">Auto</div><div class="card">' +
     numRow('sMass', 'Hmotnost s řidičem', 'kg – pro virtuální dyno', CFG.mass, 10) +
     numRow('sPrice', 'Cena nafty', 'Kč za litr – pro cenu jízdy', CFG.price, 0.1) +
     numRow('sShift', 'Pípnout na řazení', 'ot/min', CFG.shiftRpm, 100) + '</div>' +
@@ -118,6 +127,7 @@ function renderSettings(){
     togRow('sRec', 'Nahrávat jízdu automaticky', 'CSV do Stažených souborů', CFG.autoRec) + '</div>' +
     '<div class="lbl2">Data</div><div class="card"><p>Historie (jízdy, testy, poslední hodnoty) je uložená v telefonu a přežije restart i aktualizaci aplikace.</p>' +
     '<button class="btn ghost wide" id="sDelAll">' + (Date.now() - delAllArm < 4000 ? 'Opravdu smazat celou historii?' : 'Smazat celou historii') + '</button></div>';
+  $('sTheme').querySelectorAll('button').forEach(b => { b.classList.toggle('on', b.dataset.t === CFG.theme); b.onclick = () => { CFG.theme = b.dataset.t; saveCfg(); applyTheme(CFG.theme); renderSettings(); }; });
   const num = (id, key, min, max) => { $(id).onchange = e => { const v = parseFloat(String(e.target.value).replace(',', '.')); if (isFinite(v) && v >= min && v <= max) { CFG[key] = v; saveCfg(); } else e.target.value = CFG[key]; }; };
   num('sMass', 'mass', 500, 4000); num('sPrice', 'price', 1, 200); num('sShift', 'shiftRpm', 1500, 6000);
   $('sClu').onclick = () => { CFG.cluster = !CFG.cluster; saveCfg(); A && A.setClusterOnConnect && A.setClusterOnConnect(CFG.cluster); renderSettings(); };
@@ -202,5 +212,42 @@ function renderAbout(){
   $('moreBody').innerHTML = '<div class="card">' + kvRows([['Verze', esc(A && A.version ? A.version() : '?')], ['Telefon', esc(info.phone || '–')], ['Android', esc(info.android || '–')], ['Kabel', esc(info.cable || '–')],
     ['Motor', (info.engineBaud || '–') + ' Bd'], ['Panel', (info.clusterBaud || '–') + ' Bd'], ['Válců', String(S.cyl)]]) +
     '<p class="note mono" style="margin:8px 0 0;word-break:break-word">' + esc(S.ident || 'motor zatím nepřipojen') + (S.cluIdent ? '<br>' + esc(S.cluIdent) : '') + '</p></div>' +
+    '<button class="btn wide" id="aGuide" style="margin-top:10px">Ukázat průvodce prvním připojením</button>' +
     '<p class="note" style="margin-top:12px">Aplikace z auta jen čte. Nic nezapisuje, nekóduje ani nemaže. Data zůstávají v telefonu, aplikace nemá přístup k internetu.</p>';
+  $('aGuide').onclick = openGuide;
+}
+
+/* ---------- connection check ---------- */
+function usbInfo(){ try { return JSON.parse(A && A.usbInfo ? A.usbInfo() : '{}') || {}; } catch (_) { return {}; } }
+function renderCheck(){
+  const u = usbInfo(), live = S.state === 'live', busy = !!BUSY[S.state], lastKey = LOG[0] && LOG[0].k;
+  let info = {}; try { info = JSON.parse(A && A.info ? A.info() : '{}'); } catch (_) {}
+  const rate = readRate();
+  const steps = [];
+  // 1 cable
+  if (u.cable) steps.push(['ok', 'Kabel v telefonu', 'Telefon vidí diagnostický kabel.', u.cable]);
+  else if (u.devices > 0) steps.push(['bad', 'Kabel v telefonu', 'Telefon vidí USB zařízení, ale není to známý diagnostický kabel. Pošli log, doplním podporu.', (u.list || []).join(', ')]);
+  else steps.push(['bad', 'Kabel v telefonu', 'Telefon nevidí žádné USB. Použij redukci USB-C (samec) → USB-A (samice) s OTG, bez dalších převodníků. Zkus ji ověřit flashkou.', '']);
+  // 2 permission
+  if (!u.cable) steps.push(['', 'Přístup ke kabelu', 'Až bude kabel vidět.', '']);
+  else if (u.perm) steps.push(['ok', 'Přístup ke kabelu', 'Povoleno.', '']);
+  else steps.push([S.state === 'wait' ? 'run' : 'bad', 'Přístup ke kabelu', 'Při zapojení kabelu potvrď dotaz „Povolit Audi Budíky přístup…“. Pak klepni na Připojit.', '']);
+  // 3 engine
+  if (live || S.state === 'faults') steps.push(['ok', 'Motor odpovídá', esc(S.ident || 'Spojeno.'), (info.engineBaud || '?') + ' Bd']);
+  else if (busy) steps.push(['run', 'Motor odpovídá', esc(S.stText) + (lastKey === 'engine-noanswer' ? ' Je zapnuté zapalování?' : ''), '']);
+  else steps.push([u.cable && u.perm ? 'bad' : '', 'Motor odpovídá', lastKey === 'engine-noanswer' ? 'Jednotka neodpověděla. Zapni zapalování (nebo nastartuj) a zkontroluj, že kabel drží v OBD zásuvce.' : 'Klepni na Připojit.', '']);
+  // 4 data
+  if (live && rate) steps.push(['ok', 'Čtení hodnot', 'Data tečou živě.', fmt(rate, 1) + ' skupin/s']);
+  else steps.push([live ? 'run' : '', 'Čtení hodnot', live ? 'Čekám na první data…' : 'Po připojení motoru.', '']);
+  // 5 cluster
+  if (S.cluIdent) steps.push(['ok', 'Přístrojový panel', esc(S.cluIdent), (info.clusterBaud || '?') + ' Bd']);
+  else steps.push([CFG.cluster ? '' : '', 'Přístrojový panel', CFG.cluster ? 'Čte se jednou při připojení (palivo, km, venku).' : 'Vypnuté v Nastavení.', '']);
+  // 6 GPS
+  if (gpsSpeed() != null) steps.push(['ok', 'GPS', 'Signál je.', S.gpsAcc != null ? '±' + fmt(S.gpsAcc, 0) + ' m' : '']);
+  else steps.push([CFG.gps ? 'run' : '', 'GPS', CFG.gps ? esc(S.gpsState) + ' (venku to trvá do minuty)' : 'Vypnutá v Nastavení.', '']);
+  const icon = st => st === 'ok' ? '✓' : st === 'bad' ? '✕' : st === 'run' ? '…' : '·';
+  $('moreBody').innerHTML = '<div class="card">' + steps.map((s, i) => '<div class="step ' + s[0] + '"><span class="si">' + (s[0] ? icon(s[0]) : i + 1) + '</span><div class="st"><b>' + s[1] + '</b><small>' + s[2] + '</small></div>' + (s[3] ? '<span class="sv">' + esc(s[3]) + '</span>' : '') + '</div>').join('') + '</div>' +
+    (S.state === 'idle' ? '<button class="btn primary wide" id="cGo" style="margin-top:12px">Připojit a zkontrolovat</button>' : '') +
+    '<p class="note" style="margin-top:12px">Stránka se obnovuje sama. Když něco svítí červeně, je tam napsané proč a co s tím.</p>';
+  if ($('cGo')) $('cGo').onclick = () => { if (A && A.connect) A.connect(); };
 }

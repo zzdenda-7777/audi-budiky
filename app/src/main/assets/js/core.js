@@ -31,6 +31,14 @@ const ICON = {
   sound:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 10v4h4l5 4V6L8 10z"/><path d="M16 9a4 4 0 0 1 0 6"/></svg>'
 };
 
+/* ---------------- theme (colours for canvas come from CSS variables) ---------------- */
+const TH = {};
+function readTheme(){
+  const cs = getComputedStyle(document.documentElement);
+  ['track','redzone','tick','tick2','grid','pivot','chrome1','chrome2','text','muted','red','reddeep','blue','warn'].forEach(k => { TH[k] = cs.getPropertyValue('--c-' + k).trim() || '#888'; });
+}
+function applyTheme(name){ document.documentElement.dataset.theme = name === 'black' ? 'black' : 'moro'; readTheme(); }
+
 /* ---------------- storage ---------------- */
 const KV = {
   get(k, d){
@@ -52,10 +60,11 @@ const CFG_DEF = {
   snd: { shift: true, turbo: true, temp: true, volt: true, smoke: false, warm: true, cool: true, timing: true, conn: true },
   shiftRpm: 4000, mass: 1450, price: 36.5,
   cluster: true, gps: true, autoRec: false,
-  span: 60, accMode: '0-100', page: 0
+  span: 60, accMode: '0-100', page: 0, theme: 'moro', onboarded: false
 };
 const CFG = Object.assign(clone(CFG_DEF), KV.get('cfg', {}));
 CFG.snd = Object.assign(clone(CFG_DEF.snd), CFG.snd || {});
+applyTheme(CFG.theme);
 let cfgTimer = null;
 function saveCfg(){ clearTimeout(cfgTimer); cfgTimer = setTimeout(() => KV.set('cfg', CFG), 300); }
 
@@ -150,6 +159,7 @@ function ingest(e, g, f){
       if (oil != null) { S.cluHasOil = true; setM('oilT', oil, src); }
     }
   }
+  if (typeof healthIngest === 'function') healthIngest(e, g);
 }
 
 /* ---------------- derived values ---------------- */

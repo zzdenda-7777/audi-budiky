@@ -94,6 +94,13 @@
     version(){ return 'ukázka v prohlížeči'; },
     info(){ return JSON.stringify({ phone: 'Prohlížeč', android: '–', cable: 'ukázka', engineBaud: 9600, clusterBaud: 10400 }); },
     kvGet(k){ return LS.get(k); }, kvSet(k, v){ LS.set(k, v); },
+    usbInfo(){ return JSON.stringify({ devices: 1, list: ['VID=0403 PID=6001'], cable: 'Ftdi VID=0403 PID=6001', perm: true }); },
+    /* test hooks: simulate what can go wrong in the car */
+    _drop(){ if (!running) return; clearTimeout(gTimer); status('Spojení spadlo, navazuji znovu…', 'retry');
+      call('onLog', { k: 'engine-drop', m: 'Spojení s motorem spadlo: Vypršel čas, jednotka přestala odpovídat (rozpracovaný blok: 0F 2A E7)', ctx: ['17:20:01.120  skupina 011 OK 181 ms', '17:20:01.310  skupina 001 OK 176 ms'] });
+      setTimeout(() => { call('onLog', { k: 'engine-noanswer', m: 'Jednotka motoru neodpovídá. Zapnuté zapalování? Po výpadku spojení jednotka někdy až 20 s nereaguje.', ctx: ['17:20:05.000  → probouzím adresu 01 (5 Bd), linka 9600 Bd', '17:20:09.500  ← místo synchronizace: 00 00'] }); status('Motor neodpovídá – je zapnuté zapalování?', 'retry'); }, 3000);
+      setTimeout(() => { if (!running) return; status('Živě', 'live'); loop(); }, 7000); },
+    _unplug(){ running = false; clearTimeout(gTimer); status('Kabel odpojen', 'idle'); },
     recStart(){ call('onRec', { on: true, name: 'jizda_ukazka.csv' }); }, recStop(){ call('onRec', { on: false, msg: '1234 řádků · Stažené soubory/AudiBudiky/jizda_ukazka.csv' }); },
     shareLastRec(){}, shareRec(){},
     listRecs(){ return JSON.stringify([{ n: 'jizda_2026-10-31_17-20-00.csv', kb: 42, t: Date.now() }]); },

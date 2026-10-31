@@ -245,6 +245,19 @@ class MainActivity : Activity() {
             .put("clusterBaud", clusterBaud)
             .toString()
 
+        /** What the phone sees on USB right now – for the connection check screen. */
+        @JavascriptInterface
+        fun usbInfo(): String = try {
+            val um = getSystemService(Context.USB_SERVICE) as UsbManager
+            val drv = findDrivers(um).firstOrNull()
+            JSONObject()
+                .put("devices", um.deviceList.size)
+                .put("list", JSONArray(um.deviceList.values.map { "VID=%04X PID=%04X".format(it.vendorId, it.productId) }))
+                .put("cable", if (drv != null) cableName(drv) else "")
+                .put("perm", drv != null && um.hasPermission(drv.device))
+                .toString()
+        } catch (e: Exception) { "{}" }
+
         /* ---- simple key/value storage in app files (settings, history) ---- */
         @JavascriptInterface
         fun kvGet(key: String): String {
@@ -448,9 +461,7 @@ class MainActivity : Activity() {
         js("onFaults", JSONObject().put("u", unit).put("f", arr).toString())
     }
 
-    private fun startConnect(auto: Boolean) {
-        if (running) return
-        val um = getSystemService(Context.USB_SERVICE) as UsbManager
+    private fun findDrivers(um: UsbManager): List<UsbSerialDriver> {
         val drivers = ArrayList(UsbSerialProber.getDefaultProber().findAllDrivers(um))
         if (drivers.isEmpty()) {
             // Cables with a known chip vendor but a non-standard product ID.
@@ -465,6 +476,16 @@ class MainActivity : Activity() {
                 if (drv != null) drivers.add(drv)
             }
         }
+        return drivers
+    }
+
+    private fun cableName(d: UsbSerialDriver) =
+        "%s VID=%04X PID=%04X".format(d.javaClass.simpleName.replace("SerialDriver", ""), d.device.vendorId, d.device.productId)
+
+    private fun startConnect(auto: Boolean) {
+        if (running) return
+        val um = getSystemService(Context.USB_SERVICE) as UsbManager
+        val drivers = findDrivers(um)
         if (drivers.isEmpty()) {
             if (auto) { status("Čekám na kabel", "idle"); return }
             status("Kabel nenalezen", "idle")
@@ -482,7 +503,7 @@ class MainActivity : Activity() {
         }
         val driver = drivers[0]
         val dev = driver.device
-        cableInfo = "%s VID=%04X PID=%04X".format(driver.javaClass.simpleName.replace("SerialDriver", ""), dev.vendorId, dev.productId)
+        cableInfo = cableName(driver)
 
         if (!um.hasPermission(dev)) {
             val flags = if (Build.VERSION.SDK_INT >= 31) PendingIntent.FLAG_MUTABLE else 0

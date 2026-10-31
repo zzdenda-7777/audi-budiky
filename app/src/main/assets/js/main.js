@@ -40,6 +40,7 @@ function currentPlan(){
   if (curView === 'more' && moreSub === 'groups') { const p = groupsPlan(); if (p) return p; }
   if (curView === 'tests' && TST.cur) { const req = TST.cur.need(); if (req.length) return buildPlan(groupsFor([], req)); }
   if (D.focus) return buildPlan(groupsFor([D.focus.id]));
+  if (curView === 'drive' && PAGES[curPage].layout === 'health' && !D.hud) return buildPlan(groupsFor(['boost', 'maf', 'cool', 'volt']));
   if (D.hud) return buildPlan(groupsFor(D.hud.vals));
   if (curView === 'charts') return buildPlan(groupsFor(['boost', 'maf', 'iq', 'rpm', 'cool']));
   if (curView === 'trip') return buildPlan(groupsFor(['iq', 'rpm', 'cool']));
@@ -50,6 +51,7 @@ function currentPlan(){
 
 /* Android back button */
 window.onBack = function(){
+  if (!$('guide').hidden) { closeGuide(); return true; }
   if (!$('sheetBg').hidden) { closeSheet(); return true; }
   if (D.focus) { closeFocus(); return true; }
   if (D.hud) { closeHud(); return true; }
@@ -76,6 +78,22 @@ function renderStatus(){
   btn.className = 'btn ' + (active ? 'ghost' : 'primary');
 }
 $('btnConn').onclick = () => { if (!A) return; if (S.state === 'idle') A.connect(); else A.disconnect(); };
+document.querySelector('.top .pill').onclick = () => { if (S.state !== 'live' && !R.on) { showView('more'); openMore('check'); } };
+
+/* ---------- first-run guide ---------- */
+function openGuide(){
+  const g = $('guide');
+  g.innerHTML = '<h1>Vítej v Audi Budících</h1><p class="lead">Živé hodnoty z motoru přímo v telefonu. Před první jízdou:</p>' +
+    '<div class="gs"><span class="gn">1</span><div><b>Zapoj kabel</b><span>Diagnostický kabel do OBD zásuvky pod volantem, do telefonu přes redukci USB-C → USB-A s OTG. Bez dalších převodníků.</span></div></div>' +
+    '<div class="gs"><span class="gn">2</span><div><b>Zapni zapalování</b><span>Nebo rovnou nastartuj. Aplikace se k motoru připojí sama.</span></div></div>' +
+    '<div class="gs"><span class="gn">3</span><div><b>Povol přístupy</b><span>Kabel – dotaz se ukáže při zapojení. Poloha – pro rychlost, kilometry, spotřebu na 100 km a měření zrychlení.</span></div></div>' +
+    '<p class="lead" style="margin-top:6px">Aplikace z auta jen čte, nic v něm nemění.</p>' +
+    '<div class="row"><button class="btn primary" id="gOk" style="flex:1">Rozumím</button><button class="btn" id="gCheck">Kontrola spojení</button></div>';
+  g.hidden = false;
+  $('gOk').onclick = closeGuide;
+  $('gCheck').onclick = () => { closeGuide(); showView('more'); openMore('check'); };
+}
+function closeGuide(){ $('guide').hidden = true; if (!CFG.onboarded) { CFG.onboarded = true; saveCfg(); } }
 
 /* ---------- banner: one line, most important first ---------- */
 function renderBanner(){
@@ -165,6 +183,7 @@ setInterval(() => {
   sample(); renderBanner(); shiftCheck(); tripTick(dt); engineTick(dt);
   if (curView === 'charts') drawCharts();
   if (curView === 'tests' && TST.cur) updateTest();
+  if (curView === 'more' && moreSub === 'check' && tickN % 2 === 0 && !touching()) renderCheck();
   if (tickN % 4 === 0) {
     renderStatus();
     if (curView === 'trip' && tripMode === 'now' && !touching()) renderTripView(false);
@@ -182,4 +201,5 @@ if (A && A.setClusterOnConnect) A.setClusterOnConnect(!!CFG.cluster);
 if (CFG.gps && A && A.gpsStart) A.gpsStart();
 renderStatus(); updateBadges(); pushPlan(true);
 requestAnimationFrame(frame);
+if (!CFG.onboarded && !IS_DEMO) openGuide();
 if (IS_DEMO) setTimeout(() => A.connect(), 300);

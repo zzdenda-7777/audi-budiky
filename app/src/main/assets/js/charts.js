@@ -15,7 +15,7 @@ function drawChart(c, series, lo, hi, fmtY){
   x.clearRect(0, 0, W, Hh);
   const t1 = clock(), t0 = t1 - CFG.span * 1000;
   const X = t => padL + (t - t0) / (t1 - t0) * (W - padL - 4 * dpr), Y = v => padT + (1 - (v - lo) / (hi - lo)) * (Hh - padT - padB);
-  x.strokeStyle = '#241311'; x.lineWidth = 1; x.fillStyle = '#8f807c'; x.font = (10 * dpr) + 'px monospace'; x.textAlign = 'right'; x.textBaseline = 'middle';
+  x.strokeStyle = TH.grid; x.lineWidth = 1; x.fillStyle = TH.muted; x.font = (10 * dpr) + 'px monospace'; x.textAlign = 'right'; x.textBaseline = 'middle';
   for (let i = 0; i <= 4; i++) { const v = lo + (hi - lo) * i / 4, y = Y(v); x.beginPath(); x.moveTo(padL, y); x.lineTo(W, y); x.stroke(); x.fillText(fmtY(v), padL - 4 * dpr, y); }
   x.textAlign = 'center'; x.textBaseline = 'bottom';
   for (let s = 0; s <= CFG.span; s += CFG.span / 3) x.fillText('−' + Math.round(CFG.span - s) + ' s', X(t0 + s * 1000), Hh);
@@ -32,7 +32,7 @@ function drawChart(c, series, lo, hi, fmtY){
   });
 }
 function drawCharts(){
-  const red = '#ff3d2e', white = '#efe6e3', blue = '#6aa8ff', amber = '#ffb01f';
+  const red = TH.red, white = TH.text, blue = TH.blue, amber = TH.warn;
   drawChart($(CH[0]), [{ get: p => p.bs, color: white, w: 1.5 }, { get: p => p.b, color: red }], 0, 2.0, v => fmt(v, 1));
   const mx = Math.max(1000, ...H.map(p => Math.max(p.maf || 0, p.mafS || 0))) * 1.05;
   drawChart($(CH[1]), [{ get: p => p.mafS, color: white, w: 1.5 }, { get: p => p.maf, color: red }], 0, mx, v => fmt(v, 0));

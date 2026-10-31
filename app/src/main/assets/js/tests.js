@@ -14,7 +14,7 @@ function drawXY(cv, series, xr, yr, fx, fy, y2){
   x.clearRect(0, 0, W, Hh);
   const pl = 36 * dpr, pr = (y2 ? 36 : 18) * dpr, pt = 8 * dpr, pb = 16 * dpr;
   const X = v => pl + (v - xr[0]) / (xr[1] - xr[0]) * (W - pl - pr), Y = (v, r) => pt + (1 - (v - r[0]) / (r[1] - r[0])) * (Hh - pt - pb);
-  x.strokeStyle = '#241311'; x.lineWidth = 1; x.fillStyle = '#8f807c'; x.font = (10 * dpr) + 'px monospace';
+  x.strokeStyle = TH.grid; x.lineWidth = 1; x.fillStyle = TH.muted; x.font = (10 * dpr) + 'px monospace';
   for (let i = 0; i <= 4; i++) {
     const v = yr[0] + (yr[1] - yr[0]) * i / 4, y = Y(v, yr);
     x.beginPath(); x.moveTo(pl, y); x.lineTo(W - pr, y); x.stroke();
@@ -81,7 +81,7 @@ const TESTS = [
         sum: 'max ' + fmt(maxAct, 2) + ' / ' + fmt(maxSpec, 2) + ' bar', chart: { xs: s.map(p => p.rpm), a: sortX(s.map(p => [p.rpm, p.spec])), b: sortX(s.map(p => [p.rpm, p.act])) } };
       TST.st = 'done'; beep('timing', 'done'); saveTest('turbo', TST.res);
     },
-    chart(cv, c){ drawXY(cv, [{ pts: c.a, color: '#efe6e3', w: 1.5 }, { pts: c.b, color: '#ff3d2e' }], [1000, 4500], [0, 2], v => fmt(v / 1000, 1) + 'k', v => fmt(v, 1)); },
+    chart(cv, c){ drawXY(cv, [{ pts: c.a, color: TH.text, w: 1.5 }, { pts: c.b, color: TH.red }], [1000, 4500], [0, 2], v => fmt(v / 1000, 1) + 'k', v => fmt(v, 1)); },
     legend: '<span class="k"><i style="background:#efe6e3"></i>požadováno</span> <span class="k"><i style="background:#ff3d2e"></i>skutečně</span> · bar podle otáček'
   },
   { id: 'maf', name: 'Váha vzduchu (MAF)', ds: 'Kolik vzduchu motor dostane proti požadavku', need: () => [[3]], steps: () => pullSteps(),
@@ -111,7 +111,7 @@ const TESTS = [
         sum: fmt(ratio * 100, 0) + ' % požadavku, max ' + fmt(maxAct, 0) + ' mg', chart: { a: sortX(s.map(p => [p.rpm, p.spec])), b: sortX(s.map(p => [p.rpm, p.act])), mx: Math.max(1000, maxSpec, maxAct) * 1.1 } };
       TST.st = 'done'; beep('timing', 'done'); saveTest('maf', TST.res);
     },
-    chart(cv, c){ drawXY(cv, [{ pts: c.a, color: '#efe6e3', w: 1.5 }, { pts: c.b, color: '#ff3d2e' }], [1000, 4500], [0, c.mx], v => fmt(v / 1000, 1) + 'k', v => fmt(v, 0)); },
+    chart(cv, c){ drawXY(cv, [{ pts: c.a, color: TH.text, w: 1.5 }, { pts: c.b, color: TH.red }], [1000, 4500], [0, c.mx], v => fmt(v / 1000, 1) + 'k', v => fmt(v, 0)); },
     legend: '<span class="k"><i style="background:#efe6e3"></i>požadováno</span> <span class="k"><i style="background:#ff3d2e"></i>skutečně</span> · mg podle otáček'
   },
   { id: 'tim', name: 'Předvstřik', ds: 'Jak přesně čerpadlo drží začátek vstřiku', need: () => [[4], [1, 7]],
@@ -204,7 +204,7 @@ const TESTS = [
         sum: fmt(best.kw, 0) + ' kW · ' + fmt(bestT.nm, 0) + ' Nm', chart: { kwE, nmE, kwW, mx: Math.max(60, best.kw * 1.2, maxW > 0 ? maxW * 1.1 : 0), nmx: Math.max(150, bestT.nm * 1.2) } };
       TST.st = 'done'; beep('timing', 'done'); saveTest('dyno', TST.res);
     },
-    chart(cv, c){ drawXY(cv, [{ pts: c.kwE, color: '#ff3d2e' }, { pts: c.kwW, color: '#6aa8ff' }, { pts: c.nmE, color: '#efe6e3', w: 1.5, dash: true, right: true }], [1000, 4600], [0, c.mx], v => fmt(v / 1000, 1) + 'k', v => fmt(v, 0), { r: [0, c.nmx], f: v => fmt(v, 0) }); },
+    chart(cv, c){ drawXY(cv, [{ pts: c.kwE, color: TH.red }, { pts: c.kwW, color: TH.blue }, { pts: c.nmE, color: TH.text, w: 1.5, dash: true, right: true }], [1000, 4600], [0, c.mx], v => fmt(v / 1000, 1) + 'k', v => fmt(v, 0), { r: [0, c.nmx], f: v => fmt(v, 0) }); },
     legend: '<span class="k"><i style="background:#ff3d2e"></i>kW odhad</span> <span class="k"><i style="background:#6aa8ff"></i>kW na kolech</span> <span class="k"><i style="background:#efe6e3"></i>Nm (vpravo)</span>'
   },
   { id: 'acc', name: 'Zrychlení', ds: '0–100, 60–100, 80–120 km/h podle GPS', need: () => [], needGps: true,

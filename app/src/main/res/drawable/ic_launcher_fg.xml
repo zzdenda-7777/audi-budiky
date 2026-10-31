@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Gauge in Moro blue: silver arc, red zone and red needle like the B6 cluster -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <path android:pathData="M30,62 A24,24 0 0,1 73.42,47.89"
+        android:strokeColor="#DCE3F0" android:strokeWidth="5" android:strokeLineCap="round" android:fillColor="#00000000"/>
+    <path android:pathData="M73.42,47.89 A24,24 0 0,1 78,62"
+        android:strokeColor="#FF2D3A" android:strokeWidth="5" android:strokeLineCap="round" android:fillColor="#00000000"/>
+    <path android:pathData="M54,62 L60.5,42"
+        android:strokeColor="#FF2D3A" android:strokeWidth="4" android:strokeLineCap="round" android:fillColor="#00000000"/>
+    <path android:pathData="M54,58 A4,4 0 1,1 53.99,58 Z" android:fillColor="#DCE3F0"/>
+    <path android:pathData="M40,72 L68,72" android:strokeColor="#8F9CBD" android:strokeWidth="2.5" android:strokeLineCap="round" android:fillColor="#00000000"/>
+</vector>
