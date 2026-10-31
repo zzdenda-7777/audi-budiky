@@ -32,6 +32,8 @@ import com.hoho.android.usbserial.driver.FtdiSerialDriver
 import com.hoho.android.usbserial.driver.UsbSerialDriver
 import com.hoho.android.usbserial.driver.UsbSerialPort
 import com.hoho.android.usbserial.driver.UsbSerialProber
+import com.hoho.android.usbserial.util.SerialInputOutputManager
+import java.util.concurrent.LinkedBlockingDeque
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -50,7 +52,7 @@ class MainActivity : Activity() {
     @Volatile private var address: Int = 0x01
     @Volatile private var pageReady = false
     @Volatile private var autoConnectPending = true
-    @Volatile private var clusterPeriodMs = 120_000L
+    @Volatile private var clusterPeriodMs = 300_000L
     @Volatile private var clusterNow = false
     @Volatile private var clusterBaud = 0
     @Volatile private var engineBaud = 10400
@@ -324,13 +326,13 @@ class MainActivity : Activity() {
     private fun clusterDue(now: Long, next: Long): Boolean =
         clusterNow || (clusterFails < 3 && clusterPeriodMs > 0 && now >= next)
 
-    private fun readCluster(port: UsbSerialPort) {
+    private fun readCluster(port: UsbSerialPort, rx: LinkedBlockingDeque<Int>) {
         status("Čtu přístrojový panel…", true)
         val bauds = if (clusterBaud != 0) listOf(clusterBaud) + listOf(10400, 9600).filter { it != clusterBaud }
                     else listOf(10400, 9600)
         for (b in bauds) {
             if (!running) return
-            val k = Kw1281(port) { log("[přístroje] $it") }
+            val k = Kw1281(port, rx) { log("[přístroje] $it") }
             try {
                 val ident = k.connect(0x17, b)
                 clusterBaud = b
@@ -437,22 +439,32 @@ class MainActivity : Activity() {
     }
 
     private fun session(port: UsbSerialPort, conn: UsbDeviceConnection) {
+        var io: SerialInputOutputManager? = null
+        try {
+            android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_URGENT_AUDIO)
+        } catch (_: Exception) { }
         try {
             port.open(conn)
             port.setParameters(10400, 8, UsbSerialPort.STOPBITS_1, UsbSerialPort.PARITY_NONE)
             try { (port as? FtdiSerialDriver.FtdiSerialPort)?.setLatencyTimer(1) } catch (_: Exception) { }
             try { port.setDTR(true); port.setRTS(false) } catch (_: Exception) { }
+            val rx = LinkedBlockingDeque<Int>()
+            io = SerialInputOutputManager(port, object : SerialInputOutputManager.Listener {
+                override fun onNewData(data: ByteArray) { for (b in data) rx.addLast(b.toInt() and 0xFF) }
+                override fun onRunError(e: Exception) { if (running) log("Čtení z kabelu skončilo: ${e.message}") }
+            })
+            io.start()
 
             var failures = 0
             var nextCluster = SystemClock.elapsedRealtime() + 5000
             while (running) {
                 if (clusterDue(SystemClock.elapsedRealtime(), nextCluster)) {
                     clusterNow = false
-                    readCluster(port)
+                    readCluster(port, rx)
                     nextCluster = SystemClock.elapsedRealtime() + clusterPeriodMs
                     continue
                 }
-                val k = Kw1281(port) { log(it) }
+                val k = Kw1281(port, rx) { log(it) }
                 try {
                     status("Probouzím řídicí jednotku motoru…", false)
                     val ident = k.connect(address, engineBaud)
@@ -467,6 +479,7 @@ class MainActivity : Activity() {
                     log("Motor: $name")
                     val logged = HashSet<Int>()
                     var i = 0
+                    var rateT0 = SystemClock.elapsedRealtime()
                     while (running) {
                         if (clusterDue(SystemClock.elapsedRealtime(), nextCluster)) break
                         val p = plan
@@ -479,12 +492,16 @@ class MainActivity : Activity() {
                                 " [t${it.type} ${it.a}/${it.b}]" }))
                         recorder.write(address, g, fields)
                         emit(address, g, fields, SystemClock.elapsedRealtime() - t0)
+                        if (i % 100 == 0) {
+                            val now = SystemClock.elapsedRealtime()
+                            if (rateT0 != 0L) log("Rychlost: %.1f skupin/s".format(Locale.US, 100_000.0 / (now - rateT0)))
+                            rateT0 = now
+                        }
                     }
                     k.end()
                 } catch (e: Exception) {
                     if (!running) break
                     if (e is BaudMismatch) engineBaud = e.suggested
-                    else if (failures >= 1) engineBaud = if (engineBaud == 10400) 9600 else 10400
                     failures++
                     status("Spojení přerušeno, zkouším znovu…", false)
                     log("Chyba: ${e.message}")
@@ -494,6 +511,7 @@ class MainActivity : Activity() {
         } catch (e: Exception) {
             log("Chyba kabelu: ${e.message}")
         } finally {
+            try { io?.stop() } catch (_: Exception) { }
             try { port.close() } catch (_: Exception) { }
             running = false
             status("Odpojeno", false)

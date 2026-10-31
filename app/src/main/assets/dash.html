@@ -254,7 +254,7 @@ input{font-family:var(--mono);width:12em}
     <div class="panel">
       <h2>Nastavení</h2>
       <div class="switch"><span>Zvuková upozornění</span><select id="optSound"><option value="1">Zapnuto</option><option value="0">Vypnuto</option></select></div>
-      <div class="switch"><span>Číst přístrojový panel</span><select id="optCluster"><option value="0">Jen tlačítkem</option><option value="60">Každou minutu</option><option value="120" selected>Každé 2 minuty</option><option value="300">Každých 5 minut</option></select></div>
+      <div class="switch"><span>Číst přístrojový panel</span><select id="optCluster"><option value="0">Jen tlačítkem</option><option value="60">Každou minutu</option><option value="120">Každé 2 minuty</option><option value="300" selected>Každých 5 minut</option></select></div>
       <div class="switch"><span>GPS při spuštění</span><select id="optGps"><option value="0">Vypnuto</option><option value="1">Zapnout</option></select></div>
     </div>
     <div class="panel">
@@ -664,7 +664,7 @@ input{font-family:var(--mono);width:12em}
   $('btnCustom').onclick=()=>{ $('mode').value='custom'; applyPlan($('custom').value); };
   $('btnCluster').onclick=()=>{ if(A&&A.readClusterNow){ A.readClusterNow(); $('cluNote').textContent='Čtu přístroje… (motor se na pár sekund přeruší)'; } };
   $('optSound').value=String(store.get('sound',1)); $('optSound').onchange=e=>{ soundOn=e.target.value==='1'; store.set('sound',soundOn?1:0); if(soundOn&&A&&A.beep) A.beep(1); };
-  $('optCluster').value=String(store.get('cluster',120)); $('optCluster').onchange=e=>{ store.set('cluster',+e.target.value); applyCluster(); };
+  $('optCluster').value=String(store.get('cluster',300)); $('optCluster').onchange=e=>{ store.set('cluster',+e.target.value); applyCluster(); };
   $('optGps').value=String(store.get('gps',0)); $('optGps').onchange=e=>{ store.set('gps',+e.target.value); if(e.target.value==='1'&&A&&A.gpsStart) A.gpsStart(); };
   (function initPlan(){ const p=store.get('plan',null); if(p){ const o=[...$('mode').options].find(o=>o.value===p); if(o) $('mode').value=p; else { $('mode').value='custom'; $('custom').value=p; } applyPlan(p); } else applyPlan($('mode').value); })();
   if(store.get('gps',0)===1 && A && A.gpsStart) A.gpsStart();

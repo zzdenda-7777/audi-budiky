@@ -3,6 +3,8 @@ package cz.audibudiky
 import android.os.SystemClock
 import com.hoho.android.usbserial.driver.UsbSerialPort
 import java.io.IOException
+import java.util.concurrent.LinkedBlockingDeque
+import java.util.concurrent.TimeUnit
 
 class Field(
     val type: Int,
@@ -27,35 +29,25 @@ class BaudMismatch(val suggested: Int, msg: String) : IOException(msg)
  */
 class Kw1281(
     private val port: UsbSerialPort,
+    /** Bytes from the cable, filled by a SerialInputOutputManager (no data loss, unlike short read timeouts). */
+    private val rx: LinkedBlockingDeque<Int>,
     private val log: (String) -> Unit
 ) {
-    private val rx = ArrayDeque<Int>()
-    private val buf = ByteArray(512)
     private var counter = 0
     private var echo: Boolean? = null
     var connectedBaud = 0
         private set
 
-    private fun fill(timeoutMs: Int): Boolean {
-        val n = port.read(buf, timeoutMs.coerceAtLeast(1))
-        for (i in 0 until n) rx.addLast(buf[i].toInt() and 0xFF)
-        return n > 0
-    }
-
-    fun readByte(timeoutMs: Int = 1000): Int {
-        val end = SystemClock.elapsedRealtime() + timeoutMs
-        while (rx.isEmpty()) {
-            val left = (end - SystemClock.elapsedRealtime()).toInt()
-            if (left <= 0) throw IOException("Vypršel čas při čtení z jednotky")
-            fill(minOf(left, 200))
-        }
-        return rx.removeFirst()
-    }
+    fun readByte(timeoutMs: Int = 1000): Int =
+        rx.pollFirst(timeoutMs.coerceAtLeast(1).toLong(), TimeUnit.MILLISECONDS)
+            ?: throw IOException("Vypršel čas při čtení z jednotky")
 
     private fun drain() {
-        rx.clear()
         var guard = 0
-        while (fill(30) && guard++ < 50) { /* discard */ }
+        do {
+            rx.clear()
+            SystemClock.sleep(40)
+        } while (rx.isNotEmpty() && guard++ < 50)
         rx.clear()
     }
 
@@ -178,7 +170,7 @@ class Kw1281(
         val title = recvWithComplement()
         val data = IntArray((len - 3).coerceAtLeast(0)) { recvWithComplement() }
         val end = readByte(1500)
-        if (end != 0x03) log("Neočekávaný konec bloku %02X".format(end))
+        if (end != 0x03) throw IOException("Rozsypaný blok (konec %02X), navazuji znovu".format(end))
         counter = cnt
         return Block(cnt, title, data)
     }
@@ -191,7 +183,7 @@ class Kw1281(
         bytes[2] = title
         for (i in data.indices) bytes[3 + i] = data[i]
         bytes[bytes.size - 1] = 0x03
-        SystemClock.sleep(5)
+        SystemClock.sleep(2)
         for (i in 0 until bytes.size - 1) {
             writeByte(bytes[i])
             val c = readByte(1500)
