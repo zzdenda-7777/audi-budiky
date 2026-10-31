@@ -20,27 +20,38 @@ class Block(val counter: Int, val title: Int, val data: IntArray)
 /** The unit answered, but at a different baud rate. */
 class BaudMismatch(val suggested: Int, msg: String) : IOException(msg)
 
+/** The unit did not answer the 5-baud wake-up at all. */
+class NoAnswer(msg: String) : IOException(msg)
+
 /**
  * KW1281 (VAG K-line) over a KKL USB cable.
  *
  * - 5-baud init is done by toggling the line with setBreak().
  * - KKL cables usually echo every byte we send; the echo is detected and discarded.
  * - Every received byte except the block end (0x03) is acknowledged with its complement.
+ *
+ * [trace] receives a step-by-step description that is only shown to the user when something fails.
  */
 class Kw1281(
     private val port: UsbSerialPort,
     /** Bytes from the cable, filled by a SerialInputOutputManager (no data loss, unlike short read timeouts). */
     private val rx: LinkedBlockingDeque<Int>,
-    private val log: (String) -> Unit
+    private val trace: (String) -> Unit
 ) {
     private var counter = 0
     private var echo: Boolean? = null
+    private val cur = StringBuilder() // bytes of the block currently being received
     var connectedBaud = 0
         private set
 
+    private fun hex(b: Int) = "%02X".format(b and 0xFF)
+
     fun readByte(timeoutMs: Int = 1000): Int =
         rx.pollFirst(timeoutMs.coerceAtLeast(1).toLong(), TimeUnit.MILLISECONDS)
-            ?: throw IOException("Vypršel čas při čtení z jednotky")
+            ?: throw IOException(
+                "Vypršel čas, jednotka přestala odpovídat" +
+                    (if (cur.isNotEmpty()) " (rozpracovaný blok: ${cur.toString().trim()})" else "")
+            )
 
     private fun drain() {
         var guard = 0
@@ -63,13 +74,15 @@ class Kw1281(
                 rx.addFirst(e)
                 if (echo == null) {
                     echo = false
-                    log("Kabel nevrací echo, pokračuji bez něj")
+                    trace("kabel nevrací echo")
+                } else {
+                    throw IOException("Kabel vrátil jiné echo (${hex(e)} místo ${hex(v)}), rušení na lince?")
                 }
             }
         } catch (ex: IOException) {
             if (echo == null) {
                 echo = false
-                log("Kabel nevrací echo, pokračuji bez něj")
+                trace("kabel nevrací echo")
             } else {
                 throw ex
             }
@@ -92,17 +105,19 @@ class Kw1281(
         }
     }
 
-    /** Wakes up the control unit and returns its identification texts. */
+    /** Wakes up the control unit and returns its identification text. */
     fun connect(address: Int, baud: Int = 10400): List<String> {
         echo = null
         counter = 0
+        cur.setLength(0)
         port.setParameters(baud, 8, UsbSerialPort.STOPBITS_1, UsbSerialPort.PARITY_NONE)
         drain()
         port.setBreak(false)
         SystemClock.sleep(600)
         drain()
 
-        log("Posílám adresu %02X rychlostí 5 baud…".format(address))
+        trace("→ probouzím adresu ${hex(address)} (5 Bd), linka $baud Bd")
+        val t0 = SystemClock.elapsedRealtime()
         fiveBaud(address)
 
         var deadline = SystemClock.elapsedRealtime() + 2500
@@ -114,7 +129,7 @@ class Kw1281(
         while (SystemClock.elapsedRealtime() < deadline) {
             val b = try { readByte(300) } catch (e: IOException) { continue }
             if (b == 0x55) { gotSync = true; break }
-            if (ignored.length < 120) ignored.append("%02X ".format(b))
+            if (ignored.length < 120) ignored.append(hex(b)).append(' ')
             if (b != 0x00) garbage++
             // 0x55 sent at 9600 Bd and read at 10400 Bd arrives as 0xB5 / 0x95.
             if (!switched && curBaud == 10400 && (b == 0xB5 || b == 0x95)) {
@@ -122,22 +137,22 @@ class Kw1281(
                 switched = true
                 port.setParameters(curBaud, 8, UsbSerialPort.STOPBITS_1, UsbSerialPort.PARITY_NONE)
                 rx.clear()
-                log("Jednotka odpovídá rychlostí 9600 Bd, přepínám a čekám na zopakování…")
+                trace("jednotka mluví 9600 Bd, přepínám")
                 deadline = SystemClock.elapsedRealtime() + 2500
             }
         }
-        if (ignored.isNotEmpty()) log("Přijato místo synchronizace: ${ignored.toString().trim()}")
+        if (ignored.isNotEmpty()) trace("← místo synchronizace: ${ignored.toString().trim()}")
         if (!gotSync) {
-            if (switched) throw BaudMismatch(9600, "Jednotka mluví rychlostí 9600 Bd, příště se připojím rovnou tak")
+            if (switched) throw BaudMismatch(9600, "Jednotka mluví rychlostí 9600 Bd, další pokus už bude rovnou tak")
             if (garbage > 0) throw BaudMismatch(if (baud == 10400) 9600 else 10400,
-                "Jednotka odpovídá, ale jinou rychlostí – zkusím jinou")
-            throw IOException("Jednotka neodpověděla. Je zapnuté zapalování a kabel v OBD zásuvce?")
+                "Jednotka odpovídá nesrozumitelně (${ignored.toString().trim()}), zkusím jinou rychlost")
+            throw NoAnswer("Jednotka ${hex(address)} neodpověděla na probuzení")
         }
         connectedBaud = curBaud
 
         val kb1 = readByte(500)
         val kb2 = readByte(500)
-        log("Synchronizace OK ($curBaud Bd), klíčová slova %02X %02X".format(kb1, kb2))
+        trace("← synchronizace OK za ${SystemClock.elapsedRealtime() - t0} ms, klíčová slova ${hex(kb1)} ${hex(kb2)}, $curBaud Bd")
         SystemClock.sleep(30)
         writeByte(kb2 xor 0xFF)
 
@@ -155,22 +170,27 @@ class Kw1281(
             sendBlock(0x09, IntArray(0))
         }
         val txt = sb.toString().replace(Regex(" {2,}"), "  ").trim()
+        trace("← identifikace: $txt")
         return if (txt.isEmpty()) emptyList() else listOf(txt)
     }
 
     private fun recvWithComplement(): Int {
         val b = readByte(1500)
+        cur.append(hex(b)).append(' ')
         writeByte(b xor 0xFF)
         return b
     }
 
     fun receiveBlock(): Block {
+        cur.setLength(0)
         val len = recvWithComplement()
+        if (len < 3) throw IOException("Rozsypaný blok (délka ${hex(len)})")
         val cnt = recvWithComplement()
         val title = recvWithComplement()
-        val data = IntArray((len - 3).coerceAtLeast(0)) { recvWithComplement() }
+        val data = IntArray(len - 3) { recvWithComplement() }
         val end = readByte(1500)
-        if (end != 0x03) throw IOException("Rozsypaný blok (konec %02X), navazuji znovu".format(end))
+        if (end != 0x03) throw IOException("Rozsypaný blok (konec ${hex(end)} místo 03): ${cur.toString().trim()}")
+        cur.setLength(0)
         counter = cnt
         return Block(cnt, title, data)
     }
@@ -188,14 +208,14 @@ class Kw1281(
             writeByte(bytes[i])
             val c = readByte(1500)
             if (c != (bytes[i] xor 0xFF)) {
-                throw IOException("Jednotka potvrdila špatně (%02X místo %02X)".format(c, bytes[i] xor 0xFF))
+                throw IOException("Jednotka potvrdila bajt ${hex(bytes[i])} špatně (${hex(c)} místo ${hex(bytes[i] xor 0xFF)})")
             }
         }
         writeByte(0x03)
     }
 
-    /** Reads one measuring group (VCDS "Meas. Blocks"). */
-    fun readGroup(group: Int): List<Field> {
+    /** Reads one measuring group (VCDS "Meas. Blocks"). Returns null when the unit does not support the group. */
+    fun readGroup(group: Int): List<Field>? {
         sendBlock(0x29, intArrayOf(group and 0xFF))
         val blk = receiveBlock()
         return when (blk.title) {
@@ -208,10 +228,30 @@ class Kw1281(
                 }
                 out
             }
-            0x0A -> { log("Skupina $group: jednotka ji nepodporuje"); emptyList() }
+            0x0A -> { trace("skupina $group: jednotka ji nemá"); null }
             0x09 -> emptyList()
-            else -> { log("Skupina $group: neznámá odpověď %02X".format(blk.title)); emptyList() }
+            else -> throw IOException("Skupina $group: nečekaná odpověď ${hex(blk.title)} (data ${blk.data.joinToString(" ") { hex(it) }})")
         }
+    }
+
+    /** Reads stored fault codes (read only, nothing is cleared). Returns pairs code -> status. */
+    fun readFaults(): List<Pair<Int, Int>> {
+        sendBlock(0x07, IntArray(0))
+        val out = ArrayList<Pair<Int, Int>>()
+        var guard = 0
+        while (guard++ < 30) {
+            val blk = receiveBlock()
+            if (blk.title != 0xFC) break
+            var i = 0
+            while (i + 2 < blk.data.size) {
+                val code = (blk.data[i] shl 8) or blk.data[i + 1]
+                if (code != 0xFFFF) out.add(code to blk.data[i + 2])
+                i += 3
+            }
+            sendBlock(0x09, IntArray(0))
+        }
+        trace("← chybové kódy: ${out.size}")
+        return out
     }
 
     fun end() {

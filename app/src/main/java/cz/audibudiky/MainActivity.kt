@@ -9,13 +9,13 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
+import android.hardware.usb.UsbDeviceConnection
+import android.hardware.usb.UsbManager
 import android.location.Location
 import android.location.LocationListener
 import android.location.LocationManager
 import android.media.AudioManager
 import android.media.ToneGenerator
-import android.hardware.usb.UsbDeviceConnection
-import android.hardware.usb.UsbManager
 import android.os.Build
 import android.os.Bundle
 import android.os.Environment
@@ -28,12 +28,14 @@ import android.webkit.JavascriptInterface
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.core.content.FileProvider
+import com.hoho.android.usbserial.driver.Ch34xSerialDriver
+import com.hoho.android.usbserial.driver.Cp21xxSerialDriver
 import com.hoho.android.usbserial.driver.FtdiSerialDriver
+import com.hoho.android.usbserial.driver.ProlificSerialDriver
 import com.hoho.android.usbserial.driver.UsbSerialDriver
 import com.hoho.android.usbserial.driver.UsbSerialPort
 import com.hoho.android.usbserial.driver.UsbSerialProber
 import com.hoho.android.usbserial.util.SerialInputOutputManager
-import java.util.concurrent.LinkedBlockingDeque
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -41,6 +43,7 @@ import java.io.IOException
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.concurrent.LinkedBlockingDeque
 
 class MainActivity : Activity() {
 
@@ -48,18 +51,36 @@ class MainActivity : Activity() {
     private val main = Handler(Looper.getMainLooper())
 
     @Volatile private var running = false
-    @Volatile private var plan: IntArray = intArrayOf(11, 11, 1, 11, 11, 3, 11, 11, 7)
+    @Volatile private var plan: IntArray = intArrayOf(11, 1, 11, 3)
     @Volatile private var address: Int = 0x01
     @Volatile private var pageReady = false
     @Volatile private var autoConnectPending = true
-    @Volatile private var clusterPeriodMs = 300_000L
+    @Volatile private var clusterOnConnect = true
     @Volatile private var clusterNow = false
     @Volatile private var clusterBaud = 0
     @Volatile private var engineBaud = 10400
-    @Volatile private var clusterFails = 0
+    @Volatile private var faultsReq = 0
+    @Volatile private var cableInfo = ""
     private var locationManager: LocationManager? = null
     private val tone: ToneGenerator? by lazy {
         try { ToneGenerator(AudioManager.STREAM_MUSIC, 90) } catch (e: Exception) { null }
+    }
+
+    /* ---------- logging: details are collected quietly and only shown when something fails ---------- */
+    private val traceBuf = ArrayDeque<String>()
+    private val tsFmt = SimpleDateFormat("HH:mm:ss.SSS", Locale.US)
+
+    private fun trace(msg: String) {
+        synchronized(traceBuf) {
+            traceBuf.addLast(tsFmt.format(Date()) + "  " + msg)
+            while (traceBuf.size > 60) traceBuf.removeFirst()
+        }
+    }
+
+    /** Shows an error in the app log together with what happened just before it. */
+    private fun error(key: String, msg: String) {
+        val ctx = synchronized(traceBuf) { val l = traceBuf.toList(); traceBuf.clear(); l }
+        js("onLog", JSONObject().put("k", key).put("m", msg).put("ctx", JSONArray(ctx)).toString())
     }
 
     private val locListener = object : LocationListener {
@@ -73,8 +94,8 @@ class MainActivity : Activity() {
                     .toString()
             )
         }
-        override fun onProviderEnabled(provider: String) { js("onGpsState", JSONObject.quote("GPS zapnuta, čekám na signál")) }
-        override fun onProviderDisabled(provider: String) { js("onGpsState", JSONObject.quote("Zapni v telefonu polohu (GPS)")) }
+        override fun onProviderEnabled(provider: String) { js("onGpsState", JSONObject.quote("GPS zapnutá, čekám na signál")) }
+        override fun onProviderDisabled(provider: String) { js("onGpsState", JSONObject.quote("Zapni v telefonu polohu")) }
         @Deprecated("old API")
         override fun onStatusChanged(provider: String?, status: Int, extras: Bundle?) { }
     }
@@ -82,18 +103,16 @@ class MainActivity : Activity() {
     private val actionPermission = "cz.audibudiky.USB_PERMISSION"
     private lateinit var recorder: Recorder
     private val logDir by lazy { File(filesDir, "logs").also { it.mkdirs() } }
+    private val kvDir by lazy { File(filesDir, "kv").also { it.mkdirs() } }
 
     private val usbReceiver = object : BroadcastReceiver() {
         override fun onReceive(c: Context, i: Intent) {
             when (i.action) {
                 UsbManager.ACTION_USB_DEVICE_DETACHED -> {
-                    if (running) log("Kabel odpojen")
                     running = false
+                    status("Kabel odpojen", "idle")
                 }
-                UsbManager.ACTION_USB_DEVICE_ATTACHED -> {
-                    log("Kabel připojen")
-                    main.postDelayed({ startConnect(auto = true) }, 800)
-                }
+                UsbManager.ACTION_USB_DEVICE_ATTACHED -> main.postDelayed({ startConnect(auto = true) }, 800)
             }
         }
     }
@@ -134,6 +153,22 @@ class MainActivity : Activity() {
         }
     }
 
+    override fun onPause() {
+        super.onPause()
+        if (pageReady) js("onAppPause", "0")
+    }
+
+    @Deprecated("Deprecated in Java")
+    override fun onBackPressed() {
+        if (!pageReady) { defaultBack(); return }
+        web.evaluateJavascript("(window.onBack && window.onBack()) ? '1' : '0'") { r ->
+            if (r == null || !r.contains("1")) defaultBack()
+        }
+    }
+
+    /** Leaves the app but keeps it (and a running connection) alive in the background. */
+    private fun defaultBack() { moveTaskToBack(true) }
+
     override fun onDestroy() {
         running = false
         try { unregisterReceiver(usbReceiver) } catch (_: Exception) { }
@@ -159,26 +194,42 @@ class MainActivity : Activity() {
         fun setAddress(a: Int) { address = a and 0x7F }
 
         @JavascriptInterface
-        fun setClusterPeriod(seconds: Int) { clusterPeriodMs = seconds.coerceAtLeast(0) * 1000L }
+        fun setClusterOnConnect(on: Boolean) { clusterOnConnect = on }
+
+        /** Old API, kept so older pages keep working: the cluster is no longer read periodically. */
+        @JavascriptInterface
+        fun setClusterPeriod(seconds: Int) { }
 
         @JavascriptInterface
-        fun readClusterNow() { clusterFails = 0; clusterNow = true }
+        fun readClusterNow() { clusterNow = true }
+
+        @JavascriptInterface
+        fun readFaults(unit: Int) { faultsReq = unit and 0x7F }
 
         @JavascriptInterface
         fun beep(kind: Int) {
-            try {
-                tone?.startTone(
-                    if (kind >= 2) ToneGenerator.TONE_CDMA_HIGH_L else ToneGenerator.TONE_PROP_BEEP2,
-                    if (kind >= 2) 700 else 250
-                )
-            } catch (_: Exception) { }
+            val (t, ms) = when (kind) {
+                2 -> ToneGenerator.TONE_CDMA_HIGH_L to 700      // alarm
+                3 -> ToneGenerator.TONE_PROP_BEEP to 120        // shift
+                4 -> ToneGenerator.TONE_PROP_PROMPT to 400      // done (warm, cooldown)
+                5 -> ToneGenerator.TONE_PROP_ACK to 300         // connected
+                6 -> ToneGenerator.TONE_PROP_NACK to 450        // connection lost
+                7 -> ToneGenerator.TONE_CDMA_PIP to 150         // timing start
+                else -> ToneGenerator.TONE_PROP_BEEP2 to 250    // info
+            }
+            try { tone?.startTone(t, ms) } catch (_: Exception) { }
         }
 
         @JavascriptInterface
         fun gpsStart() { main.post { startGps() } }
 
         @JavascriptInterface
-        fun gpsStop() { main.post { try { locationManager?.removeUpdates(locListener) } catch (_: Exception) { }; js("onGpsState", JSONObject.quote("GPS vypnuta")) } }
+        fun gpsStop() {
+            main.post {
+                try { locationManager?.removeUpdates(locListener) } catch (_: Exception) { }
+                js("onGpsState", JSONObject.quote("GPS vypnutá"))
+            }
+        }
 
         @JavascriptInterface
         fun version(): String = try {
@@ -186,40 +237,90 @@ class MainActivity : Activity() {
         } catch (e: Exception) { "?" }
 
         @JavascriptInterface
+        fun info(): String = JSONObject()
+            .put("phone", "${Build.MANUFACTURER} ${Build.MODEL}")
+            .put("android", "${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})")
+            .put("cable", cableInfo)
+            .put("engineBaud", engineBaud)
+            .put("clusterBaud", clusterBaud)
+            .toString()
+
+        /* ---- simple key/value storage in app files (settings, history) ---- */
+        @JavascriptInterface
+        fun kvGet(key: String): String {
+            val f = File(kvDir, safe(key) + ".json")
+            return try { if (f.isFile) f.readText(Charsets.UTF_8) else "" } catch (_: Exception) { "" }
+        }
+
+        @JavascriptInterface
+        fun kvSet(key: String, value: String) {
+            try {
+                val f = File(kvDir, safe(key) + ".json")
+                val tmp = File(kvDir, safe(key) + ".tmp")
+                tmp.writeText(value, Charsets.UTF_8)
+                if (!tmp.renameTo(f)) { f.writeText(value, Charsets.UTF_8); tmp.delete() }
+            } catch (e: Exception) {
+                error("kv", "Nepodařilo se uložit data ($key): ${e.message}")
+            }
+        }
+
+        /* ---- CSV recordings ---- */
+        @JavascriptInterface
         fun recStart() {
             try {
                 val f = recorder.start()
                 js("onRec", JSONObject().put("on", true).put("name", f.name).toString())
-                log("Záznam spuštěn: ${f.name}")
             } catch (e: Exception) {
-                log("Záznam nejde spustit: ${e.message}")
+                error("rec", "Záznam nejde spustit: ${e.message}")
             }
         }
 
         @JavascriptInterface
         fun recStop() {
             val f = recorder.stop()
-            val msg = if (f == null) "Záznam neběžel" else try {
-                "${recorder.rows} řádků. " + saveToDownloads(f, "text/csv")
+            if (f == null) { js("onRec", JSONObject().put("on", false).put("msg", "").toString()); return }
+            val msg = try {
+                "${recorder.rows} řádků · " + saveToDownloads(f, "text/csv")
             } catch (e: Exception) {
-                "Záznam je v aplikaci (${f.name}), do Stažených souborů nešel uložit: ${e.message}. Použij Sdílet."
+                error("rec", "Záznam ${f.name} se nepodařilo zkopírovat do Stažených souborů: ${e.message}")
+                "Záznam je uložený v aplikaci, použij Sdílet"
             }
-            js("onRec", JSONObject().put("on", false).put("msg", msg).toString())
-            log(msg)
+            js("onRec", JSONObject().put("on", false).put("msg", msg).put("name", f.name).toString())
         }
 
         @JavascriptInterface
         fun shareLastRec() {
             val f = recorder.lastFile ?: logDir.listFiles { x -> x.name.endsWith(".csv") }?.maxByOrNull { it.lastModified() }
-            if (f == null) { log("Zatím žádný záznam ke sdílení"); return }
+            if (f == null) return
             main.post { share(f, "text/csv") }
         }
 
         @JavascriptInterface
+        fun shareRec(name: String) {
+            val f = File(logDir, File(name).name)
+            if (f.isFile) main.post { share(f, "text/csv") }
+        }
+
+        @JavascriptInterface
+        fun listRecs(): String {
+            val arr = JSONArray()
+            (logDir.listFiles { x -> x.name.endsWith(".csv") } ?: arrayOf())
+                .sortedByDescending { it.lastModified() }.take(60)
+                .forEach { arr.put(JSONObject().put("n", it.name).put("kb", it.length() / 1024).put("t", it.lastModified())) }
+            return arr.toString()
+        }
+
+        @JavascriptInterface
+        fun readRec(name: String): String {
+            val f = File(logDir, File(name).name)
+            return try { if (f.isFile && f.length() < 40_000_000) f.readText(Charsets.UTF_8) else "" } catch (_: Exception) { "" }
+        }
+
+        /* ---- text log ---- */
+        @JavascriptInterface
         fun saveText(kind: String, text: String): String {
             return try {
-                val f = writeText(kind, text)
-                saveToDownloads(f, "text/plain")
+                saveToDownloads(writeText(kind, text), "text/plain")
             } catch (e: Exception) {
                 "Uložení se nepovedlo: ${e.message}"
             }
@@ -231,10 +332,12 @@ class MainActivity : Activity() {
                 val f = writeText(kind, text)
                 main.post { share(f, "text/plain") }
             } catch (e: Exception) {
-                log("Sdílení se nepovedlo: ${e.message}")
+                error("share", "Sdílení se nepovedlo: ${e.message}")
             }
         }
     }
+
+    private fun safe(key: String) = key.replace(Regex("[^A-Za-z0-9_-]"), "_").take(60)
 
     private fun writeText(kind: String, text: String): File {
         val name = kind + "_" + SimpleDateFormat("yyyy-MM-dd_HH-mm-ss", Locale.US).format(Date()) + ".txt"
@@ -254,13 +357,13 @@ class MainActivity : Activity() {
                 ?: throw IOException("soubor nejde vytvořit")
             contentResolver.openOutputStream(uri)?.use { out -> src.inputStream().use { it.copyTo(out) } }
                 ?: throw IOException("soubor nejde otevřít")
-            "Uloženo do Stažené soubory/AudiBudiky/${src.name}"
+            "Stažené soubory/AudiBudiky/${src.name}"
         } else {
             val dir = File(getExternalFilesDir(null), "AudiBudiky")
             dir.mkdirs()
             val dst = File(dir, src.name)
             src.copyTo(dst, overwrite = true)
-            "Uloženo do ${dst.absolutePath}"
+            dst.absolutePath
         }
     }
 
@@ -274,7 +377,7 @@ class MainActivity : Activity() {
                 .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             startActivity(Intent.createChooser(send, "Sdílet ${f.name}"))
         } catch (e: Exception) {
-            log("Sdílení se nepovedlo: ${e.message}")
+            error("share", "Sdílení se nepovedlo: ${e.message}")
         }
     }
 
@@ -293,12 +396,13 @@ class MainActivity : Activity() {
             js(
                 "onGpsState",
                 JSONObject.quote(
-                    if (m.isProviderEnabled(LocationManager.GPS_PROVIDER)) "GPS zapnuta, čekám na signál"
-                    else "Zapni v telefonu polohu (GPS)"
+                    if (m.isProviderEnabled(LocationManager.GPS_PROVIDER)) "GPS zapnutá, čekám na signál"
+                    else "Zapni v telefonu polohu"
                 )
             )
         } catch (e: Exception) {
-            js("onGpsState", JSONObject.quote("GPS nejde zapnout: ${e.message}"))
+            error("gps", "GPS nejde zapnout: ${e.message}")
+            js("onGpsState", JSONObject.quote("GPS nejde zapnout"))
         }
     }
 
@@ -310,107 +414,75 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun emit(ecu: Int, group: Int, fields: List<Field>, ms: Long) {
-        val arr = JSONArray()
-        for (f in fields) {
-            arr.put(
-                JSONObject()
-                    .put("t", f.type).put("a", f.a).put("b", f.b)
-                    .put("v", f.value ?: JSONObject.NULL)
-                    .put("u", f.unit).put("s", f.text)
-            )
-        }
-        js("onGroup", JSONObject().put("e", ecu).put("g", group).put("ms", ms).put("f", arr).toString())
-    }
-
-    private fun clusterDue(now: Long, next: Long): Boolean =
-        clusterNow || (clusterFails < 3 && clusterPeriodMs > 0 && now >= next)
-
-    private fun readCluster(port: UsbSerialPort, rx: LinkedBlockingDeque<Int>) {
-        status("Čtu přístrojový panel…", true)
-        val bauds = if (clusterBaud != 0) listOf(clusterBaud) + listOf(10400, 9600).filter { it != clusterBaud }
-                    else listOf(10400, 9600)
-        for (b in bauds) {
-            if (!running) return
-            val k = Kw1281(port, rx) { log("[přístroje] $it") }
-            try {
-                val ident = k.connect(0x17, b)
-                clusterBaud = b
-                clusterFails = 0
-                log("Přístrojový panel ($b Bd): ${ident.joinToString(" · ")}")
-                js("onClusterIdent", JSONObject.quote(ident.joinToString(" · ")))
-                for (g in intArrayOf(1, 2, 3)) {
-                    val t0 = SystemClock.elapsedRealtime()
-                    val f = k.readGroup(g)
-                    log("[přístroje] skupina %03d: %s".format(g, f.joinToString(" | ") {
-                        (if (it.value != null) String.format(Locale.US, "%.1f %s", it.value, it.unit) else it.text) +
-                            " [t${it.type} ${it.a}/${it.b}]" }))
-                    recorder.write(0x17, g, f)
-                    emit(0x17, g, f, SystemClock.elapsedRealtime() - t0)
-                }
-                k.end()
-                return
-            } catch (e: Exception) {
-                log("Přístroje při $b Bd: ${e.message}")
-                SystemClock.sleep(1500)
-            }
-        }
-        clusterFails++
-        if (clusterFails >= 3) log("Přístrojový panel se nedaří přečíst, automatické čtení vypínám. Zkus Načíst teď.")
-    }
-
     private fun js(fn: String, arg: String) {
+        if (!pageReady) return
         main.post { web.evaluateJavascript("window.$fn && window.$fn($arg)", null) }
     }
 
-    private fun log(msg: String) = js("onLog", JSONObject.quote(msg))
+    /** state: idle | wait | connecting | live | retry | cluster | faults */
+    private fun status(text: String, state: String) =
+        js("onStatus", JSONObject().put("text", text).put("state", state).put("ok", state == "live").toString())
 
-    private fun status(text: String, ok: Boolean) =
-        js("onStatus", JSONObject().put("text", text).put("ok", ok).toString())
+    private fun emit(ecu: Int, group: Int, fields: List<Field>?, ms: Long) {
+        val o = JSONObject().put("e", ecu).put("g", group).put("ms", ms)
+        if (fields == null) {
+            o.put("na", true).put("f", JSONArray())
+        } else {
+            val arr = JSONArray()
+            for (f in fields) {
+                arr.put(
+                    JSONObject()
+                        .put("t", f.type).put("a", f.a).put("b", f.b)
+                        .put("v", f.value ?: JSONObject.NULL)
+                        .put("u", f.unit).put("s", f.text)
+                )
+            }
+            o.put("f", arr)
+        }
+        js("onGroup", o.toString())
+    }
+
+    private fun emitFaults(unit: Int, list: List<Pair<Int, Int>>) {
+        val arr = JSONArray()
+        list.forEach { arr.put(JSONObject().put("c", it.first).put("s", it.second)) }
+        js("onFaults", JSONObject().put("u", unit).put("f", arr).toString())
+    }
 
     private fun startConnect(auto: Boolean) {
-        if (running) { if (!auto) log("Spojení už běží"); return }
+        if (running) return
         val um = getSystemService(Context.USB_SERVICE) as UsbManager
         val drivers = ArrayList(UsbSerialProber.getDefaultProber().findAllDrivers(um))
         if (drivers.isEmpty()) {
-            // Fallback: cables with a known chip vendor but a non-standard product ID.
+            // Cables with a known chip vendor but a non-standard product ID.
             for (d in um.deviceList.values) {
                 val drv: UsbSerialDriver? = when (d.vendorId) {
-                    0x0403 -> com.hoho.android.usbserial.driver.FtdiSerialDriver(d)
-                    0x1A86 -> com.hoho.android.usbserial.driver.Ch34xSerialDriver(d)
-                    0x10C4 -> com.hoho.android.usbserial.driver.Cp21xxSerialDriver(d)
-                    0x067B -> com.hoho.android.usbserial.driver.ProlificSerialDriver(d)
+                    0x0403 -> FtdiSerialDriver(d)
+                    0x1A86 -> Ch34xSerialDriver(d)
+                    0x10C4 -> Cp21xxSerialDriver(d)
+                    0x067B -> ProlificSerialDriver(d)
                     else -> null
                 }
                 if (drv != null) drivers.add(drv)
             }
         }
         if (drivers.isEmpty()) {
-            if (!auto) {
-                status("Kabel nenalezen", false)
-                val list = um.deviceList.values
-                if (list.isEmpty()) {
-                    log("Telefon nevidí ŽÁDNÉ USB zařízení. Chyba je v redukci, ne v kabelu ani v autě. " +
-                        "Potřebuješ redukci USB-C (samec) → USB-A (samice) s OTG, bez dalších převodníků. " +
-                        "Ověř ji flashkou nebo myší.")
-                } else {
-                    log("Telefon vidí USB zařízení, ale žádné není známý diagnostický kabel:")
-                    for (d in list) {
-                        log("USB zařízení: VID=%04X PID=%04X %s %s".format(
-                            d.vendorId, d.productId,
-                            runCatching { d.manufacturerName }.getOrNull() ?: "",
-                            runCatching { d.productName }.getOrNull() ?: ""))
-                    }
-                    log("Pošli mi tenhle řádek s VID/PID, doplním podporu.")
-                }
+            if (auto) { status("Čekám na kabel", "idle"); return }
+            status("Kabel nenalezen", "idle")
+            val list = um.deviceList.values
+            if (list.isEmpty()) {
+                error("nocable", "Telefon nevidí žádné USB zařízení. Chyba je v redukci, ne v kabelu ani v autě. " +
+                    "Potřebuješ redukci USB-C (samec) → USB-A (samice) s OTG, bez dalších převodníků.")
             } else {
-                status("Čekám na kabel", false)
+                error("nocable", "Telefon vidí USB zařízení, ale žádné není známý diagnostický kabel: " +
+                    list.joinToString { d ->
+                        "VID=%04X PID=%04X %s".format(d.vendorId, d.productId, runCatching { d.productName }.getOrNull() ?: "")
+                    } + ". Pošli tenhle řádek, doplním podporu.")
             }
             return
         }
         val driver = drivers[0]
         val dev = driver.device
-        log("Kabel: %s (VID=%04X PID=%04X)".format(driver.javaClass.simpleName, dev.vendorId, dev.productId))
+        cableInfo = "%s VID=%04X PID=%04X".format(driver.javaClass.simpleName.replace("SerialDriver", ""), dev.vendorId, dev.productId)
 
         if (!um.hasPermission(dev)) {
             val flags = if (Build.VERSION.SDK_INT >= 31) PendingIntent.FLAG_MUTABLE else 0
@@ -418,7 +490,11 @@ class MainActivity : Activity() {
             val receiver = object : BroadcastReceiver() {
                 override fun onReceive(c: Context, i: Intent) {
                     try { unregisterReceiver(this) } catch (_: Exception) { }
-                    if (um.hasPermission(dev)) startConnect(auto = false) else status("Přístup ke kabelu nebyl povolen", false)
+                    if (um.hasPermission(dev)) startConnect(auto = false)
+                    else {
+                        status("Přístup ke kabelu nebyl povolen", "idle")
+                        error("perm", "Přístup ke kabelu nebyl povolen. Při zapojení kabelu potvrď dotaz „Povolit Audi Budíky…“.")
+                    }
                 }
             }
             if (Build.VERSION.SDK_INT >= 33) {
@@ -426,23 +502,59 @@ class MainActivity : Activity() {
             } else {
                 registerReceiver(receiver, IntentFilter(actionPermission))
             }
-            status("Povol přístup ke kabelu", false)
+            status("Povol přístup ke kabelu", "wait")
             um.requestPermission(dev, pi)
             return
         }
 
         val conn = um.openDevice(dev)
-        if (conn == null) { status("Kabel nejde otevřít", false); return }
+        if (conn == null) {
+            status("Kabel nejde otevřít", "idle")
+            error("open", "Kabel ($cableInfo) nejde otevřít. Odpoj ho a zapoj znovu.")
+            return
+        }
         val port = driver.ports[0]
         running = true
         Thread({ session(port, conn) }, "kw1281").start()
     }
 
+    private fun readCluster(port: UsbSerialPort, rx: LinkedBlockingDeque<Int>, faults: Boolean) {
+        status(if (faults) "Čtu chyby přístrojů…" else "Čtu přístrojový panel…", if (faults) "faults" else "cluster")
+        val bauds = if (clusterBaud != 0) listOf(clusterBaud) + listOf(10400, 9600).filter { it != clusterBaud }
+                    else listOf(10400, 9600)
+        var last: Exception? = null
+        for (b in bauds) {
+            if (!running) return
+            val k = Kw1281(port, rx) { trace("[panel] $it") }
+            try {
+                val ident = k.connect(0x17, b)
+                clusterBaud = b
+                js("onClusterIdent", JSONObject.quote(ident.joinToString(" ")))
+                if (faults) {
+                    emitFaults(0x17, k.readFaults())
+                } else {
+                    for (g in intArrayOf(1, 2, 3)) {
+                        val t0 = SystemClock.elapsedRealtime()
+                        val f = k.readGroup(g)
+                        if (f != null) recorder.write(0x17, g, f)
+                        emit(0x17, g, f, SystemClock.elapsedRealtime() - t0)
+                    }
+                }
+                k.end()
+                return
+            } catch (e: Exception) {
+                last = e
+                trace("[panel] $b Bd: ${e.message}")
+                SystemClock.sleep(1500)
+            }
+        }
+        if (faults) js("onFaults", JSONObject().put("u", 0x17).put("err", last?.message ?: "?").toString())
+        error("cluster", "Přístrojový panel se nepodařilo přečíst: ${last?.message}")
+    }
+
     private fun session(port: UsbSerialPort, conn: UsbDeviceConnection) {
         var io: SerialInputOutputManager? = null
-        try {
-            android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_URGENT_AUDIO)
-        } catch (_: Exception) { }
+        try { android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_URGENT_AUDIO) } catch (_: Exception) { }
         try {
             port.open(conn)
             port.setParameters(10400, 8, UsbSerialPort.STOPBITS_1, UsbSerialPort.PARITY_NONE)
@@ -451,70 +563,84 @@ class MainActivity : Activity() {
             val rx = LinkedBlockingDeque<Int>()
             io = SerialInputOutputManager(port, object : SerialInputOutputManager.Listener {
                 override fun onNewData(data: ByteArray) { for (b in data) rx.addLast(b.toInt() and 0xFF) }
-                override fun onRunError(e: Exception) { if (running) log("Čtení z kabelu skončilo: ${e.message}") }
+                override fun onRunError(e: Exception) { if (running) trace("čtení z kabelu skončilo: ${e.message}") }
             })
             io.start()
+            trace("kabel $cableInfo otevřen")
 
+            var clusterDone = !clusterOnConnect
             var failures = 0
-            var nextCluster = SystemClock.elapsedRealtime() + 5000
             while (running) {
-                if (clusterDue(SystemClock.elapsedRealtime(), nextCluster)) {
-                    clusterNow = false
-                    readCluster(port, rx)
-                    nextCluster = SystemClock.elapsedRealtime() + clusterPeriodMs
-                    continue
-                }
-                val k = Kw1281(port, rx) { log(it) }
+                if (faultsReq == 0x17) { faultsReq = 0; readCluster(port, rx, faults = true); continue }
+                if (clusterNow || !clusterDone) { clusterNow = false; clusterDone = true; readCluster(port, rx, faults = false); continue }
+
+                val k = Kw1281(port, rx) { trace(it) }
+                var live = false
                 try {
-                    status("Probouzím řídicí jednotku motoru…", false)
+                    status(if (failures == 0) "Připojuji motor…" else "Připojuji motor znovu…", if (failures == 0) "connecting" else "retry")
                     val ident = k.connect(address, engineBaud)
-                    if (k.connectedBaud != 0) {
+                    if (k.connectedBaud != 0 && k.connectedBaud != engineBaud) {
                         engineBaud = k.connectedBaud
                         try { getSharedPreferences("ab", 0).edit().putInt("engineBaud", engineBaud).apply() } catch (_: Exception) { }
                     }
                     failures = 0
-                    val name = ident.joinToString(" · ")
-                    status("Spojeno", true)
-                    js("onIdent", JSONObject.quote(name))
-                    log("Motor: $name")
-                    val logged = HashSet<Int>()
+                    live = true
+                    js("onIdent", JSONObject.quote(ident.joinToString(" ")))
+                    status("Živě", "live")
                     var i = 0
-                    var rateT0 = SystemClock.elapsedRealtime()
                     while (running) {
-                        if (clusterDue(SystemClock.elapsedRealtime(), nextCluster)) break
+                        if (clusterNow || faultsReq == 0x17) break
+                        if (faultsReq != 0 && faultsReq == address) {
+                            faultsReq = 0
+                            status("Čtu chybové kódy…", "faults")
+                            try {
+                                emitFaults(address, k.readFaults())
+                            } catch (e: Exception) {
+                                js("onFaults", JSONObject().put("u", address).put("err", e.message ?: "?").toString())
+                                throw e
+                            }
+                            status("Živě", "live")
+                        }
                         val p = plan
                         val g = p[i % p.size]
                         i++
                         val t0 = SystemClock.elapsedRealtime()
                         val fields = k.readGroup(g)
-                        if (logged.add(g)) log("Motor skupina %03d: %s".format(g, fields.joinToString(" | ") {
-                            (if (it.value != null) String.format(Locale.US, "%.1f %s", it.value, it.unit) else it.text) +
-                                " [t${it.type} ${it.a}/${it.b}]" }))
-                        recorder.write(address, g, fields)
-                        emit(address, g, fields, SystemClock.elapsedRealtime() - t0)
-                        if (i % 100 == 0) {
-                            val now = SystemClock.elapsedRealtime()
-                            if (rateT0 != 0L) log("Rychlost: %.1f skupin/s".format(Locale.US, 100_000.0 / (now - rateT0)))
-                            rateT0 = now
-                        }
+                        val ms = SystemClock.elapsedRealtime() - t0
+                        trace("skupina %03d %s %d ms".format(g, if (fields == null) "není" else "OK", ms))
+                        if (fields != null) recorder.write(address, g, fields)
+                        emit(address, g, fields, ms)
                     }
                     k.end()
                 } catch (e: Exception) {
                     if (!running) break
                     if (e is BaudMismatch) engineBaud = e.suggested
                     failures++
-                    status("Spojení přerušeno, zkouším znovu…", false)
-                    log("Chyba: ${e.message}")
-                    SystemClock.sleep(if (failures < 3) 2500 else 5000)
+                    when {
+                        live -> {
+                            status("Spojení spadlo, navazuji znovu…", "retry")
+                            error("engine-drop", "Spojení s motorem spadlo: ${e.message}")
+                        }
+                        e is NoAnswer -> {
+                            status("Motor neodpovídá – je zapnuté zapalování?", "retry")
+                            error("engine-noanswer", "Jednotka motoru neodpovídá. Zapnuté zapalování? Po výpadku spojení jednotka někdy až 20 s nereaguje.")
+                        }
+                        e is BaudMismatch -> trace("rychlost: ${e.message}")
+                        else -> {
+                            status("Připojení se nepovedlo, zkouším znovu…", "retry")
+                            error("engine-connect", "Připojení k motoru se nepovedlo: ${e.message}")
+                        }
+                    }
+                    SystemClock.sleep(if (e is BaudMismatch) 1500 else if (failures < 3) 2500 else 4000)
                 }
             }
         } catch (e: Exception) {
-            log("Chyba kabelu: ${e.message}")
+            error("usb", "Chyba kabelu: ${e.message}")
         } finally {
             try { io?.stop() } catch (_: Exception) { }
             try { port.close() } catch (_: Exception) { }
             running = false
-            status("Odpojeno", false)
+            status("Odpojeno", "idle")
         }
     }
 }
