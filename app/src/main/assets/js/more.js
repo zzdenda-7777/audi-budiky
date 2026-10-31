@@ -30,7 +30,7 @@ const MENU = [
   ['faults', 'Chybové kódy', 'Přečíst chyby motoru a přístrojů (jen čtení)'],
   ['recs', 'Záznamy jízd', 'Nahrávání do CSV, sdílení, přehrání'],
   ['settings', 'Nastavení', 'Auto, cena nafty, GPS, panel'],
-  ['sounds', 'Zvuky', 'Které pípání chceš slyšet'],
+  ['sounds', 'Zvuky a hlas', 'Hlasová hlášení nebo pípání, co hlásit'],
   ['groups', 'Surové skupiny', 'Všechny hodnoty z jednotky (pro pokročilé)'],
   ['log', 'Log chyb', 'Zapisují se sem jen problémy'],
   ['about', 'O aplikaci', 'Verze, telefon, kabel']
@@ -118,7 +118,10 @@ function renderRecs(){
 function togRow(id, title, sub, on){ return '<div class="switch"><span class="sw-t">' + title + (sub ? '<small>' + sub + '</small>' : '') + '</span><button class="tog' + (on ? ' on' : '') + '" id="' + id + '" aria-label="' + title + '"></button></div>'; }
 function numRow(id, title, sub, val, step){ return '<div class="switch"><span class="sw-t">' + title + (sub ? '<small>' + sub + '</small>' : '') + '</span><input class="num-in" id="' + id + '" type="number" inputmode="decimal" step="' + step + '" value="' + val + '"></div>'; }
 function renderSettings(){
-  $('moreBody').innerHTML = '<div class="lbl2">Vzhled</div><div class="card"><div class="seg" id="sTheme"><button data-t="moro">Moro modrá (LZ5J)</button><button data-t="black">Černá</button></div></div>' +
+  $('moreBody').innerHTML = '<div class="lbl2">Vzhled</div><div class="card"><div class="seg" id="sTheme"><button data-t="moro">Moro modrá</button><button data-t="black">Černá</button><button data-t="night">Noční</button></div>' +
+    togRow('sNightAuto', 'Noční režim po setmění', 'automaticky podle západu slunce v místě, kde jsi', CFG.nightAuto) +
+    togRow('sNightDim', 'V noci ztlumit displej', 'aby tě displej neoslňoval', CFG.nightDim) +
+    '<p class="note" style="margin:6px 0 0">' + esc(sunText()) + '</p></div>' +
     '<div class="lbl2">Auto</div><div class="card">' +
     numRow('sMass', 'Hmotnost s řidičem', 'kg – ' + esc(PROFILE.short) + ', pro virtuální dyno', carMass(), 10) +
     numRow('sPrice', 'Cena nafty', 'Kč za litr – pro cenu jízdy', CFG.price, 0.1) +
@@ -129,7 +132,9 @@ function renderSettings(){
     togRow('sRec', 'Nahrávat jízdu automaticky', 'CSV do Stažených souborů', CFG.autoRec) + '</div>' +
     '<div class="lbl2">Data</div><div class="card"><p>Historie (jízdy, testy, poslední hodnoty) je uložená v telefonu a přežije restart i aktualizaci aplikace.</p>' +
     '<button class="btn ghost wide" id="sDelAll">' + (Date.now() - delAllArm < 4000 ? 'Opravdu smazat celou historii?' : 'Smazat celou historii') + '</button></div>';
-  $('sTheme').querySelectorAll('button').forEach(b => { b.classList.toggle('on', b.dataset.t === CFG.theme); b.onclick = () => { CFG.theme = b.dataset.t; saveCfg(); applyTheme(CFG.theme); renderSettings(); }; });
+  $('sTheme').querySelectorAll('button').forEach(b => { b.classList.toggle('on', b.dataset.t === CFG.theme); b.onclick = () => { CFG.theme = b.dataset.t; saveCfg(); themeTick(); renderSettings(); }; });
+  $('sNightAuto').onclick = () => { CFG.nightAuto = !CFG.nightAuto; saveCfg(); themeTick(); renderSettings(); };
+  $('sNightDim').onclick = () => { CFG.nightDim = !CFG.nightDim; saveCfg(); themeTick(); renderSettings(); };
   const num = (id, key, min, max) => { $(id).onchange = e => { const v = parseFloat(String(e.target.value).replace(',', '.')); if (isFinite(v) && v >= min && v <= max) { CFG[key] = v; saveCfg(); } else e.target.value = CFG[key]; }; };
   $('sMass').onchange = e => { const v = parseFloat(String(e.target.value).replace(',', '.')); if (isFinite(v) && v >= 500 && v <= 4000) { CFG.massBy = CFG.massBy || {}; CFG.massBy[PROFILE.id] = v; saveCfg(); } else e.target.value = carMass(); }; num('sPrice', 'price', 1, 200); num('sShift', 'shiftRpm', 1500, 6000);
   $('sClu').onclick = () => { CFG.cluster = !CFG.cluster; saveCfg(); A && A.setClusterOnConnect && A.setClusterOnConnect(CFG.cluster); renderSettings(); };
@@ -143,13 +148,25 @@ function renderSettings(){
 
 /* ---------- sounds ---------- */
 const SND_TEST = { shift: 'shift', turbo: 'alarm', temp: 'alarm', volt: 'info', smoke: 'info', warm: 'done', cool: 'done', timing: 'start', conn: 'conn' };
+const SND_SAY = { shift: 'řaď', turbo: 'Nedotlak turba', temp: 'Vysoká teplota vody, 110 stupňů', volt: 'Alternátor nenabíjí, 12,6 voltu', smoke: 'Bohatá směs, kouří',
+  warm: 'Motor zahřátý', cool: 'Turbo vychladlé, můžeš vypnout motor', timing: '0 až 100 za 9,8 sekundy', conn: 'Spojení obnoveno' };
 function renderSounds(){
-  $('moreBody').innerHTML = '<div class="card">' + togRow('sndAll', 'Zvuky', 'hlavní vypínač', CFG.sound) + '</div><div class="card">' +
-    SND_CATS.map(c => '<div class="switch"><span class="sw-t">' + c[1] + '<small>' + c[2] + '</small></span><button class="ibtn" data-try="' + c[0] + '" aria-label="Přehrát">' + ICON.sound + '</button><button class="tog' + (CFG.snd[c[0]] ? ' on' : '') + '" data-snd="' + c[0] + '" aria-label="' + c[1] + '"></button></div>').join('') +
-    '</div><p class="note" style="margin-top:10px">Hlasitost řídí hlasitost médií v telefonu. Řazení pípne v ' + fmt(CFG.shiftRpm, 0) + ' ot/min (změníš v Nastavení).</p>';
+  let ts = 0; try { ts = A && A.ttsState ? A.ttsState() : 0; } catch (_) {}
+  const ttsLine = ts === 1 ? '<span style="color:var(--ok)">✓ čeština v telefonu je</span>' : ts === 2 ? '<span style="color:var(--warn)">V telefonu chybí čeština pro předčítání – zatím se pípá.</span>' : ts === 3 ? '<span style="color:var(--warn)">Předčítání v telefonu nefunguje – zatím se pípá.</span>' : 'Hlas se načítá…';
+  $('moreBody').innerHTML = '<div class="card">' + togRow('sndAll', 'Zvuky', 'hlavní vypínač', CFG.sound) +
+    '<div class="lbl2">Jak upozorňovat</div><div class="seg" id="sndMode"><button data-m="voice">Hlasem</button><button data-m="beep">Pípnutím</button></div>' +
+    '<p class="note" style="margin:8px 0 0">' + ttsLine + (CFG.voice ? '<br>Hlas mluví jako navigace – když hraje rádio přes Bluetooth, ztiší ho a promluví do reproduktorů auta.' : '') + '</p>' +
+    (CFG.voice && (ts === 2 || ts === 3) ? '<button class="btn small" id="ttsSet" style="margin-top:8px">Nastavení předčítání v telefonu</button>' : '') + '</div>' +
+    '<div class="card">' + SND_CATS.map(c => '<div class="switch"><span class="sw-t">' + c[1] + '<small>' + (CFG.voice ? '„' + esc(SND_SAY[c[0]]) + '“' : c[2]) + '</small></span><button class="ibtn" data-try="' + c[0] + '" aria-label="Přehrát">' + ICON.sound + '</button><button class="tog' + (CFG.snd[c[0]] ? ' on' : '') + '" data-snd="' + c[0] + '" aria-label="' + c[1] + '"></button></div>').join('') +
+    '</div><p class="note" style="margin-top:10px">Hlasitost řídí hlasitost médií v telefonu. Řazení se ozve v ' + fmt(CFG.shiftRpm, 0) + ' ot/min (změníš v Nastavení). Varování hlasem se opakují nejvýš jednou za 30 s, aby se v autě pořád nemluvilo.</p>';
   $('sndAll').onclick = () => { CFG.sound = !CFG.sound; saveCfg(); renderSounds(); };
+  $('sndMode').querySelectorAll('button').forEach(b => { b.classList.toggle('on', (b.dataset.m === 'voice') === !!CFG.voice); b.onclick = () => { CFG.voice = b.dataset.m === 'voice'; saveCfg(); renderSounds(); }; });
+  if ($('ttsSet')) $('ttsSet').onclick = () => { if (A && A.openTtsSettings) A.openTtsSettings(); };
   $('moreBody').querySelectorAll('[data-snd]').forEach(b => b.onclick = () => { const k = b.dataset.snd; CFG.snd[k] = !CFG.snd[k]; saveCfg(); renderSounds(); });
-  $('moreBody').querySelectorAll('[data-try]').forEach(b => b.onclick = () => { if (A && A.beep) A.beep(SND[SND_TEST[b.dataset.try]] || 1); });
+  $('moreBody').querySelectorAll('[data-try]').forEach(b => b.onclick = () => {
+    const k = b.dataset.try;
+    if (CFG.voice && ttsOk()) A.say(SND_SAY[k], true); else if (A && A.beep) A.beep(SND[SND_TEST[k]] || 1);
+  });
 }
 
 /* ---------- raw groups ---------- */

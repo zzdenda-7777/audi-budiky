@@ -37,8 +37,10 @@ const TH = {};
 function readTheme(){
   const cs = getComputedStyle(document.documentElement);
   ['track','redzone','tick','tick2','grid','pivot','chrome1','chrome2','text','muted','red','reddeep','blue','warn'].forEach(k => { TH[k] = cs.getPropertyValue('--c-' + k).trim() || '#888'; });
+  TH.okc = cs.getPropertyValue('--ok').trim(); TH.warnc = cs.getPropertyValue('--warn').trim(); TH.badc = cs.getPropertyValue('--bad').trim();
 }
-function applyTheme(name){ document.documentElement.dataset.theme = name === 'black' ? 'black' : 'moro'; readTheme(); }
+let curTheme = '';
+function applyTheme(name){ curTheme = (name === 'black' || name === 'night') ? name : 'moro'; document.documentElement.dataset.theme = curTheme; readTheme(); }
 
 /* ---------------- storage ---------------- */
 const KV = {
@@ -57,15 +59,15 @@ const KV = {
 };
 
 const CFG_DEF = {
-  sound: true,
+  sound: true, voice: true,
   snd: { shift: true, turbo: true, temp: true, volt: true, smoke: false, warm: true, cool: true, timing: true, conn: true },
   shiftRpm: 4000, mass: 1450, price: 36.5,
   cluster: true, gps: true, autoRec: false,
-  span: 60, accMode: '0-100', page: 0, theme: 'moro', onboarded: false, profile: 'a4v6', massBy: {}
+  span: 60, accMode: '0-100', page: 0, theme: 'moro', nightAuto: true, nightDim: true, lastPos: null, onboarded: false, profile: 'a4v6', massBy: {}
 };
 const CFG = Object.assign(clone(CFG_DEF), KV.get('cfg', {}));
 CFG.snd = Object.assign(clone(CFG_DEF.snd), CFG.snd || {});
-applyTheme(CFG.theme);
+applyTheme(CFG.theme === 'night' ? 'night' : CFG.theme);
 let cfgTimer = null;
 function saveCfg(){ clearTimeout(cfgTimer); cfgTimer = setTimeout(() => KV.set('cfg', CFG), 300); }
 
@@ -276,26 +278,35 @@ const SND_CATS = [
   ['conn','Spojení','navázáno a ztraceno']
 ];
 const lastBeep = {};
-function beep(cat, kind, minGapMs){
+function ttsOk(){ try { return !!(A && A.say && A.ttsState && A.ttsState() === 1); } catch (_) { return false; } }
+/* One sound event: spoken in Czech when the voice is on (and installed), otherwise a beep.
+   Spoken warnings repeat less often than beeps so the car is not full of talking. */
+function beep(cat, kind, minGapMs, say){
   if (!CFG.sound || !CFG.snd[cat] || R.on) return;
+  const voice = !!(CFG.voice && say && ttsOk());
   const t = performance.now(), key = cat + kind;
-  if (minGapMs && lastBeep[key] && t - lastBeep[key] < minGapMs) return;
+  let gap = minGapMs || 0;
+  if (voice && gap && (kind === 'alarm' || kind === 'info')) gap = Math.max(gap, kind === 'alarm' ? 30000 : 90000);
+  if (gap && lastBeep[key] && t - lastBeep[key] < gap) return;
   lastBeep[key] = t;
-  if (A && A.beep) A.beep(SND[kind] || 1);
+  if (voice) A.say(say, kind === 'alarm');
+  else if (A && A.beep) A.beep(SND[kind] || 1);
 }
+const n0 = v => String(Math.round(v));
+const n1 = v => fmt(v, 1);
 
 /* ---------------- alerts (shown one at a time in the banner) ---------------- */
 const ALERTS = [
-  { id:'over', lvl:'bad', snd:'turbo', txt:'Přetlak turba', hold:1000, test:() => { const b = boostRel(), s = boostSpecRel(); return b != null && s != null && b > 0.3 && s > 0.5 && b - s > 0.15; }, info:() => '+' + fmt(boostRel() - boostSpecRel(), 2) + ' bar' },
-  { id:'under', lvl:'warn', snd:'turbo', txt:'Nedotlak turba', hold:1500, test:() => { const b = boostRel(), s = boostSpecRel(), rpm = fresh('rpm', 3000) || 0; return b != null && s != null && rpm > 2000 && s > 0.5 && s - b > 0.25; }, info:() => fmt(boostRel() - boostSpecRel(), 2) + ' bar' },
-  { id:'cool2', lvl:'bad', snd:'temp', txt:'Přehřívání motoru', hold:1000, test:() => (fresh('cool', 10000) || 0) > 113, info:() => fmt(any('cool'), 0) + ' °C' },
-  { id:'cool', lvl:'warn', snd:'temp', txt:'Vysoká teplota vody', hold:2000, test:() => (fresh('cool', 10000) || 0) > 108, info:() => fmt(any('cool'), 0) + ' °C' },
-  { id:'oil', lvl:'bad', snd:'temp', txt:'Vysoká teplota oleje', hold:1000, test:() => (any('oilT') || 0) > 135, info:() => fmt(any('oilT'), 0) + ' °C' },
-  { id:'fuel', lvl:'warn', snd:'temp', txt:'Horké palivo', hold:3000, test:() => (fresh('fuelT', 10000) || 0) > 80, info:() => fmt(any('fuelT'), 0) + ' °C' },
-  { id:'afr2', lvl:'bad', snd:'smoke', txt:'Velmi bohatá směs', hold:800, test:() => { const a = afr(), iq = fresh('iq', 3000) || 0; return a != null && iq > 15 && a < 14; }, info:() => fmt(afr(), 1) + ':1' },
-  { id:'afr', lvl:'warn', snd:'smoke', txt:'Bohatá směs (kouř)', hold:1000, test:() => { const a = afr(), iq = fresh('iq', 3000) || 0; return a != null && iq > 15 && a < 16; }, info:() => fmt(afr(), 1) + ':1' },
-  { id:'maf', lvl:'warn', snd:'turbo', txt:'Málo vzduchu (MAF)', hold:2500, test:() => { const v = fresh('maf', 3000), s = fresh('mafSpec', 3000), rpm = fresh('rpm', 3000) || 0; return v != null && s > 500 && rpm > 1800 && v < s * 0.85; }, info:() => fmt((fresh('maf') / fresh('mafSpec') - 1) * 100, 0) + ' %' },
-  { id:'volt', lvl:'warn', snd:'volt', txt:'Alternátor nenabíjí', hold:5000, test:() => { const v = fresh('volt', 8000), rpm = fresh('rpm', 3000) || 0; return v != null && rpm > 700 && v < 12.8; }, info:() => fmt(any('volt'), 1) + ' V' }
+  { id:'over', say:() => 'Přetlak turba', lvl:'bad', snd:'turbo', txt:'Přetlak turba', hold:1000, test:() => { const b = boostRel(), s = boostSpecRel(); return b != null && s != null && b > 0.3 && s > 0.5 && b - s > 0.15; }, info:() => '+' + fmt(boostRel() - boostSpecRel(), 2) + ' bar' },
+  { id:'under', say:() => 'Nedotlak turba', lvl:'warn', snd:'turbo', txt:'Nedotlak turba', hold:1500, test:() => { const b = boostRel(), s = boostSpecRel(), rpm = fresh('rpm', 3000) || 0; return b != null && s != null && rpm > 2000 && s > 0.5 && s - b > 0.25; }, info:() => fmt(boostRel() - boostSpecRel(), 2) + ' bar' },
+  { id:'cool2', say:() => 'Přehřívání motoru, voda ' + n0(any('cool')) + ' stupňů', lvl:'bad', snd:'temp', txt:'Přehřívání motoru', hold:1000, test:() => (fresh('cool', 10000) || 0) > 113, info:() => fmt(any('cool'), 0) + ' °C' },
+  { id:'cool', say:() => 'Vysoká teplota vody, ' + n0(any('cool')) + ' stupňů', lvl:'warn', snd:'temp', txt:'Vysoká teplota vody', hold:2000, test:() => (fresh('cool', 10000) || 0) > 108, info:() => fmt(any('cool'), 0) + ' °C' },
+  { id:'oil', say:() => 'Vysoká teplota oleje, ' + n0(any('oilT')) + ' stupňů', lvl:'bad', snd:'temp', txt:'Vysoká teplota oleje', hold:1000, test:() => (any('oilT') || 0) > 135, info:() => fmt(any('oilT'), 0) + ' °C' },
+  { id:'fuel', say:() => 'Horké palivo, ' + n0(any('fuelT')) + ' stupňů', lvl:'warn', snd:'temp', txt:'Horké palivo', hold:3000, test:() => (fresh('fuelT', 10000) || 0) > 80, info:() => fmt(any('fuelT'), 0) + ' °C' },
+  { id:'afr2', say:() => 'Velmi bohatá směs', lvl:'bad', snd:'smoke', txt:'Velmi bohatá směs', hold:800, test:() => { const a = afr(), iq = fresh('iq', 3000) || 0; return a != null && iq > 15 && a < 14; }, info:() => fmt(afr(), 1) + ':1' },
+  { id:'afr', say:() => 'Bohatá směs, kouří', lvl:'warn', snd:'smoke', txt:'Bohatá směs (kouř)', hold:1000, test:() => { const a = afr(), iq = fresh('iq', 3000) || 0; return a != null && iq > 15 && a < 16; }, info:() => fmt(afr(), 1) + ':1' },
+  { id:'maf', say:() => 'Málo vzduchu', lvl:'warn', snd:'turbo', txt:'Málo vzduchu (MAF)', hold:2500, test:() => { const v = fresh('maf', 3000), s = fresh('mafSpec', 3000), rpm = fresh('rpm', 3000) || 0; return v != null && s > 500 && rpm > 1800 && v < s * 0.85; }, info:() => fmt((fresh('maf') / fresh('mafSpec') - 1) * 100, 0) + ' %' },
+  { id:'volt', say:() => 'Alternátor nenabíjí, ' + n1(any('volt')) + ' voltu', lvl:'warn', snd:'volt', txt:'Alternátor nenabíjí', hold:5000, test:() => { const v = fresh('volt', 8000), rpm = fresh('rpm', 3000) || 0; return v != null && rpm > 700 && v < 12.8; }, info:() => fmt(any('volt'), 1) + ' V' }
 ];
 const aState = {};
 function activeAlerts(){
@@ -307,7 +318,8 @@ function activeAlerts(){
     if (st.on) {
       let info = ''; try { info = a.info(); } catch (_) {}
       out.push({ lvl: a.lvl, txt: a.txt, info, snd: a.snd, id: a.id });
-      beep(a.snd, a.lvl === 'bad' ? 'alarm' : 'info', a.lvl === 'bad' ? 8000 : 30000);
+      let say = ''; try { say = a.say ? a.say() : a.txt; } catch (_) { say = a.txt; }
+      beep(a.snd, a.lvl === 'bad' ? 'alarm' : 'info', a.lvl === 'bad' ? 8000 : 30000, say);
     }
   });
   return out;

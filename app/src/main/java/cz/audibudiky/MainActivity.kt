@@ -14,6 +14,7 @@ import android.hardware.usb.UsbManager
 import android.location.Location
 import android.location.LocationListener
 import android.location.LocationManager
+import android.media.AudioAttributes
 import android.media.AudioManager
 import android.media.ToneGenerator
 import android.os.Build
@@ -23,6 +24,7 @@ import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
 import android.provider.MediaStore
+import android.speech.tts.TextToSpeech
 import android.view.WindowManager
 import android.webkit.JavascriptInterface
 import android.webkit.WebView
@@ -62,6 +64,11 @@ class MainActivity : Activity() {
     @Volatile private var faultsReq = 0
     @Volatile private var cableInfo = ""
     private var locationManager: LocationManager? = null
+    /* Czech voice for announcements; plays like navigation (music is ducked, goes to the car radio over Bluetooth). */
+    private var tts: TextToSpeech? = null
+    @Volatile private var ttsState = 0 // 0 starting, 1 ok, 2 Czech missing, 3 error
+    private var ttsN = 0
+
     private val tone: ToneGenerator? by lazy {
         try { ToneGenerator(AudioManager.STREAM_MUSIC, 90) } catch (e: Exception) { null }
     }
@@ -90,6 +97,7 @@ class MainActivity : Activity() {
                 JSONObject()
                     .put("v", if (l.hasSpeed()) l.speed * 3.6 else JSONObject.NULL)
                     .put("acc", l.accuracy.toDouble())
+                    .put("lat", l.latitude).put("lon", l.longitude)
                     .put("t", l.time)
                     .toString()
             )
@@ -121,6 +129,20 @@ class MainActivity : Activity() {
         super.onCreate(savedInstanceState)
         try { engineBaud = getSharedPreferences("ab", 0).getInt("engineBaud", 10400) } catch (_: Exception) { }
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        try {
+            tts = TextToSpeech(this) { st ->
+                if (st == TextToSpeech.SUCCESS) {
+                    val t = tts
+                    val r = t?.setLanguage(Locale("cs", "CZ")) ?: TextToSpeech.LANG_NOT_SUPPORTED
+                    ttsState = if (r >= TextToSpeech.LANG_AVAILABLE) 1 else 2
+                    try {
+                        t?.setAudioAttributes(AudioAttributes.Builder()
+                            .setUsage(AudioAttributes.USAGE_ASSISTANCE_NAVIGATION_GUIDANCE)
+                            .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build())
+                    } catch (_: Exception) { }
+                } else ttsState = 3
+            }
+        } catch (e: Exception) { ttsState = 3 }
         recorder = Recorder(logDir)
         web = WebView(this)
         web.settings.javaScriptEnabled = true
@@ -171,6 +193,7 @@ class MainActivity : Activity() {
 
     override fun onDestroy() {
         running = false
+        try { tts?.shutdown() } catch (_: Exception) { }
         try { unregisterReceiver(usbReceiver) } catch (_: Exception) { }
         try { locationManager?.removeUpdates(locListener) } catch (_: Exception) { }
         recorder.stop()
@@ -219,6 +242,40 @@ class MainActivity : Activity() {
             }
             try { tone?.startTone(t, ms) } catch (_: Exception) { }
         }
+
+        /** Speak a short Czech sentence. flush = interrupt what is being said (alarms). */
+        @JavascriptInterface
+        fun say(text: String, flush: Boolean) {
+            val t = tts ?: return
+            if (ttsState != 1) return
+            try { t.speak(text, if (flush) TextToSpeech.QUEUE_FLUSH else TextToSpeech.QUEUE_ADD, null, "ab" + (ttsN++)) } catch (_: Exception) { }
+        }
+
+        @JavascriptInterface
+        fun ttsState(): Int = ttsState
+
+        @JavascriptInterface
+        fun openTtsSettings() {
+            main.post {
+                try { startActivity(Intent("com.android.settings.TTS_SETTINGS").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+                catch (e: Exception) {
+                    try { startActivity(Intent(TextToSpeech.Engine.ACTION_INSTALL_TTS_DATA).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) } catch (_: Exception) { }
+                }
+            }
+        }
+
+        /** Screen brightness 0..1 for this app only; negative = phone setting. */
+        @JavascriptInterface
+        fun setBrightness(v: Float) {
+            main.post {
+                val lp = window.attributes
+                lp.screenBrightness = if (v < 0) WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE else v.coerceIn(0.02f, 1f)
+                window.attributes = lp
+            }
+        }
+
+        @JavascriptInterface
+        fun kvDel(key: String) { try { File(kvDir, safe(key) + ".json").delete() } catch (_: Exception) { } }
 
         @JavascriptInterface
         fun gpsStart() { main.post { startGps() } }

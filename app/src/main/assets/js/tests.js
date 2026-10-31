@@ -5,6 +5,13 @@ const VERD = { ok: ['ok', 'V pořádku'], mid: ['mid', 'Hraniční'], bad: ['bad
 const verdHTML = v => { const x = VERD[v] || VERD.none; return '<span class="verdict ' + x[0] + '">' + x[1] + '</span>'; };
 const avg = a => a.length ? a.reduce((s, x) => s + x, 0) / a.length : null;
 const isNew = (k, last) => M[k] && M[k].t !== last;
+/* what the voice says when a test ends */
+function doneSay(){
+  const t = TST.cur, r = TST.res; if (!t || !r) return 'Hotovo';
+  if (t.id === 'acc') return String(r.mode || CFG.accMode).replace('-', ' až ') + ' za ' + fmt(r.time, 1) + ' sekundy';
+  const w = { ok: 'v pořádku', mid: 'hraniční', bad: 'podezřelé' }[r.v];
+  return t.name + (w ? ', ' + w : ', hotovo');
+}
 
 const TST = { cur: null, st: 'ready', d: null, res: null, msg: '' };
 
@@ -54,7 +61,7 @@ const TESTS = [
     tick(){
       const d = TST.d, spec = boostSpecRel(), act = boostRel(), rpm = fresh('rpm', 2000);
       if (TST.st === 'wait') {
-        if (spec != null && spec > 0.6) { TST.st = 'run'; d.t0 = clock(); TST.msg = 'Měřím… drž plný plyn'; beep('timing', 'start'); }
+        if (spec != null && spec > 0.6) { TST.st = 'run'; d.t0 = clock(); TST.msg = 'Měřím… drž plný plyn'; beep('timing', 'start', 0, 'Start'); }
         return;
       }
       if (isNew('boostAbs', d.last) && spec != null && act != null) { d.last = M.boostAbs.t; d.s.push({ t: clock() - d.t0, rpm, spec, act }); }
@@ -79,7 +86,7 @@ const TESTS = [
       }
       TST.res = { v, why, rows: [['Max turbo', fmt(maxAct, 2) + ' bar'], ['Max požadováno', fmt(maxSpec, 2) + ' bar'], ['Průměrná odchylka', (meanDev != null ? (meanDev >= 0 ? '+' : '') + fmt(meanDev, 2) : '–') + ' bar'], ['Nabuzení', spool != null ? fmt(spool, 1) + ' s' : 'nedosáhlo']],
         sum: 'max ' + fmt(maxAct, 2) + ' / ' + fmt(maxSpec, 2) + ' bar', chart: { xs: s.map(p => p.rpm), a: sortX(s.map(p => [p.rpm, p.spec])), b: sortX(s.map(p => [p.rpm, p.act])) } };
-      TST.st = 'done'; beep('timing', 'done'); saveTest('turbo', TST.res);
+      TST.res.num = { maxAct, maxSpec, meanDev, spool }; TST.st = 'done'; beep('timing', 'done', 0, doneSay()); saveTest('turbo', TST.res);
     },
     chart(cv, c){ drawXY(cv, [{ pts: c.a, color: TH.text, w: 1.5 }, { pts: c.b, color: TH.red }], [1000, 4500], [0, 2], v => fmt(v / 1000, 1) + 'k', v => fmt(v, 1)); },
     legend: '<span class="k"><i style="background:#efe6e3"></i>požadováno</span> <span class="k"><i style="background:#ff3d2e"></i>skutečně</span> · bar podle otáček'
@@ -92,7 +99,7 @@ const TESTS = [
       const nw = isNew('maf', d.last); if (nw) d.last = M.maf.t;
       if (TST.st === 'wait') {
         if (nw && rpm != null && rpm < 1000 && act != null && spec != null) d.idle.push({ spec, act });
-        if (spec != null && spec > 600) { TST.st = 'run'; d.t0 = clock(); TST.msg = 'Měřím… drž plný plyn'; beep('timing', 'start'); }
+        if (spec != null && spec > 600) { TST.st = 'run'; d.t0 = clock(); TST.msg = 'Měřím… drž plný plyn'; beep('timing', 'start', 0, 'Start'); }
         return;
       }
       if (nw && spec != null && act != null) d.s.push({ rpm, spec, act });
@@ -113,7 +120,7 @@ const TESTS = [
       if (v === 'mid' && ratio >= 0.93 && at3k != null) why = 'Ve 3000 ot. ' + fmt(at3k, 0) + ' mg – těsně pod normou ' + mOk + ' mg pro ' + PROFILE.short + '. Váha vzduchu začíná slábnout.';
       TST.res = { v, why, rows: [['Ve 3000 ot.', at3k != null ? fmt(at3k, 0) + ' mg' : 'nezměřeno (drž plyn až přes 3000)'], ['Norma', 'aspoň ' + mOk + ' mg'], ['Max MAF', fmt(maxAct, 0) + ' mg'], ['Max požadováno', fmt(maxSpec, 0) + ' mg'], ['Poměr při plném plynu', fmt(ratio * 100, 0) + ' %'], ['Volnoběh', idle ? fmt(idle[0], 0) + ' / ' + fmt(idle[1], 0) + ' mg' : '–']],
         sum: fmt(ratio * 100, 0) + ' % požadavku, max ' + fmt(maxAct, 0) + ' mg', chart: { a: sortX(s.map(p => [p.rpm, p.spec])), b: sortX(s.map(p => [p.rpm, p.act])), mx: Math.max(1000, maxSpec, maxAct) * 1.1 } };
-      TST.st = 'done'; beep('timing', 'done'); saveTest('maf', TST.res);
+      TST.res.num = { ratio, at3k, maxAct }; TST.st = 'done'; beep('timing', 'done', 0, doneSay()); saveTest('maf', TST.res);
     },
     chart(cv, c){ drawXY(cv, [{ pts: c.a, color: TH.text, w: 1.5 }, { pts: c.b, color: TH.red }], [1000, 4500], [0, c.mx], v => fmt(v / 1000, 1) + 'k', v => fmt(v, 0)); },
     legend: '<span class="k"><i style="background:#efe6e3"></i>požadováno</span> <span class="k"><i style="background:#ff3d2e"></i>skutečně</span> · mg podle otáček'
@@ -121,7 +128,7 @@ const TESTS = [
   { id: 'tim', name: 'Předvstřik', ds: 'Jak přesně čerpadlo drží začátek vstřiku', need: () => [[4], [1, 7]],
     steps: () => ['Motor zahřátý (voda nad 80 °C).', 'Stůj na volnoběh, nic nepřidávej.', 'Spusť test a 30 sekund počkej.'],
     live: () => [['Předvstřik', fmt(fresh('tim'), 1), '°'], ['Požadovaný', fmt(fresh('timSpec'), 1), '°'], ['Voda', fmt(fresh('cool', 10000), 0), '°C']],
-    start(){ TST.d = { s: [], last: 0, t0: clock() }; TST.st = 'run'; TST.msg = 'Měřím 30 s…'; beep('timing', 'start'); },
+    start(){ TST.d = { s: [], last: 0, t0: clock() }; TST.st = 'run'; TST.msg = 'Měřím 30 s…'; beep('timing', 'start', 0, 'Start'); },
     tick(){
       const d = TST.d, spec = fresh('timSpec', 2000), act = fresh('tim', 2000);
       if (isNew('tim', d.last)) { d.last = M.tim.t; if (spec != null && act != null) d.s.push({ spec, act, duty: fresh('timDuty', 2000) }); }
@@ -138,7 +145,7 @@ const TESTS = [
       else if (mean > 0.5) { v = 'mid'; why = 'Předvstřik se drží jen přibližně (' + fmt(mean, 1) + '°). Sleduj to.'; }
       if (cool != null && cool < 75) why += ' Pozor: motor nebyl zahřátý (' + fmt(cool, 0) + ' °C), výsledek je jen orientační.';
       TST.res = { v, why, rows: [['Průměrná odchylka', fmt(mean, 2) + '°'], ['Největší odchylka', fmt(mx, 2) + '°'], ['Ventil předvstřiku', duty != null ? fmt(duty, 0) + ' %' : '–'], ['Měření', s.length + '×']], sum: 'odchylka ' + fmt(mean, 2) + '°' };
-      TST.st = 'done'; beep('timing', 'done'); saveTest('tim', TST.res);
+      TST.res.num = { mean, mx }; TST.st = 'done'; beep('timing', 'done', 0, doneSay()); saveTest('tim', TST.res);
     }
   },
   { id: 'smooth', name: 'Klidný chod válců', ds: 'Jak jednotka vyrovnává vstřikovače jednotlivých válců', need: () => S.cyl > 4 ? [[13], [14]] : [[13]],
@@ -153,7 +160,7 @@ const TESTS = [
       g14.slice(0, 3).forEach((v, i) => a.push({ c: i + 4, v }));
       return a;
     },
-    start(){ TST.d = { acc: [], last: 0, t0: clock() }; TST.st = 'run'; TST.msg = 'Měřím 20 s…'; beep('timing', 'start'); },
+    start(){ TST.d = { acc: [], last: 0, t0: clock() }; TST.st = 'run'; TST.msg = 'Měřím 20 s…'; beep('timing', 'start', 0, 'Start'); },
     tick(){
       const d = TST.d, g = S.smooth[13];
       if (g && g.t !== d.last) { d.last = g.t; this.cyls().forEach(x => { const k = x.c - 1; (d.acc[k] = d.acc[k] || []).push(x.v); }); }
@@ -171,7 +178,7 @@ const TESTS = [
       if (S.cyl > 4) why += ' Válec 3 je u V6 referenční (má snímač zdvihu jehly), proto ukazuje 0.';
       const cool = fresh('cool', 15000); if (cool != null && cool < 75) why += ' Pozor: motor nebyl zahřátý, výsledek je jen orientační.';
       TST.res = { v, why, cyl: a.map(x => x == null ? 0 : x), rows: a.map((x, i) => ['Válec ' + (i + 1), x == null ? '–' : (x > 0 ? '+' : '') + fmt(x, 2) + ' mg']).concat([['Norma', '±' + fmt(okL, 1) + ' mg']]), sum: 'nejhorší ±' + fmt(worst, 2) + ' mg' };
-      TST.st = 'done'; beep('timing', 'done'); saveTest('smooth', TST.res);
+      TST.res.num = { worst, lim: okL }; TST.st = 'done'; beep('timing', 'done', 0, doneSay()); saveTest('smooth', TST.res);
     }
   },
   { id: 'dyno', name: 'Virtuální dyno', ds: 'Křivka výkonu a momentu podle otáček', need: () => [[1]], needGps: true,
@@ -181,7 +188,7 @@ const TESTS = [
     tick(){
       const d = TST.d, iq = fresh('iq', 2000), rpm = fresh('rpm', 2000);
       if (TST.st === 'wait') {
-        if (iq != null && iq > 30 && rpm != null && rpm < 3000) { TST.st = 'run'; d.t0 = clock(); TST.msg = 'Měřím… drž plný plyn'; beep('timing', 'start'); }
+        if (iq != null && iq > 30 && rpm != null && rpm < 3000) { TST.st = 'run'; d.t0 = clock(); TST.msg = 'Měřím… drž plný plyn'; beep('timing', 'start', 0, 'Start'); }
         return;
       }
       if (isNew('iq', d.last) && iq != null && rpm != null) { d.last = M.iq.t; d.s.push({ t: clock(), rpm, iq }); }
@@ -218,7 +225,7 @@ const TESTS = [
         (dv === 'ok' ? '' : 'Nejdřív udělej test turba a váhy vzduchu. ') + 'Výkon ze vstřiku je odhad z množství paliva (účinnost asi 36 %). Výkon na kolech z GPS je po odečtení odporu vzduchu a valení – vždy o 10–20 % nižší než výkon motoru.',
         rows: [['Výrobce', PROFILE.kw + ' kW / ' + PROFILE.nm + ' Nm'], ['Max výkon (odhad)', fmt(best.kw, 0) + ' kW / ' + fmt(best.kw * 1.36, 0) + ' k'], ['při', fmt(best.rpm, 0) + ' ot/min'], ['Max moment (odhad)', fmt(bestT.nm, 0) + ' Nm'], ['Na kolech (GPS)', maxW == null ? 'málo GPS dat' : maxW < 0 ? 'GPS nespolehlivá' : fmt(maxW, 0) + ' kW']],
         sum: fmt(best.kw, 0) + ' kW · ' + fmt(bestT.nm, 0) + ' Nm', chart: { kwE, nmE, kwW, mx: Math.max(60, best.kw * 1.2, maxW > 0 ? maxW * 1.1 : 0), nmx: Math.max(150, bestT.nm * 1.2) } };
-      TST.st = 'done'; beep('timing', 'done'); saveTest('dyno', TST.res);
+      TST.res.num = { kw: best.kw, nm: bestT.nm, share, wheel: maxW > 0 ? maxW : null }; TST.st = 'done'; beep('timing', 'done', 0, doneSay()); saveTest('dyno', TST.res);
     },
     chart(cv, c){ drawXY(cv, [{ pts: c.kwE, color: TH.red }, { pts: c.kwW, color: TH.blue }, { pts: c.nmE, color: TH.text, w: 1.5, dash: true, right: true }], [1000, 4600], [0, c.mx], v => fmt(v / 1000, 1) + 'k', v => fmt(v, 0), { r: [0, c.nmx], f: v => fmt(v, 0) }); },
     legend: '<span class="k"><i style="background:#ff3d2e"></i>kW odhad</span> <span class="k"><i style="background:#6aa8ff"></i>kW na kolech</span> <span class="k"><i style="background:#efe6e3"></i>Nm (vpravo)</span>'
@@ -237,15 +244,15 @@ const TESTS = [
       if (TST.cur !== this || TST.st !== 'wait' || v == null) return;
       const { a, b } = this.range(), d = TST.d, prev = d.prev; d.prev = { v, t };
       const cross = lvl => (prev && prev.v < lvl && v >= lvl) ? prev.t + (lvl - prev.v) / (v - prev.v) * (t - prev.t) : null;
-      if (d.st === 'idle') { if ((a === 0 && v < 1.5) || (a > 0 && v < a - 5)) { d.st = 'armed'; beep('timing', 'info'); } }
-      else if (d.st === 'armed') { const c = cross(a === 0 ? 2 : a); if (c != null) { d.st = 'run'; d.run = true; d.t0 = c; d.p0 = performance.now() - (t - c); beep('timing', 'start'); } }
+      if (d.st === 'idle') { if ((a === 0 && v < 1.5) || (a > 0 && v < a - 5)) { d.st = 'armed'; beep('timing', 'info', 0, 'Připraveno'); } }
+      else if (d.st === 'armed') { const c = cross(a === 0 ? 2 : a); if (c != null) { d.st = 'run'; d.run = true; d.t0 = c; d.p0 = performance.now() - (t - c); beep('timing', 'start', 0, 'Start'); } }
       else if (d.st === 'run') {
         if ((a === 0 && v < 1) || (a > 0 && v < a - 5)) { d.st = 'armed'; d.run = false; return; }
         const c = cross(b);
         if (c != null) {
           const time = (c - d.t0) / 1000; d.run = false;
           TST.res = { v: 'none', time, why: '', rows: [['Čas ' + CFG.accMode.replace('-', '–') + ' km/h', fmt(time, 2) + ' s']], sum: CFG.accMode.replace('-', '–') + ' za ' + fmt(time, 2) + ' s', mode: CFG.accMode };
-          TST.st = 'done'; beep('timing', 'done'); saveAcc(CFG.accMode, time); saveTest('acc', TST.res);
+          TST.res.num = { time, mode: CFG.accMode }; TST.st = 'done'; beep('timing', 'done', 0, doneSay()); saveAcc(CFG.accMode, time); saveTest('acc', TST.res);
         }
       }
       this.msgUpd();

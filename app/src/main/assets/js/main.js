@@ -121,7 +121,7 @@ function shiftCheck(){
   const rpm = fresh('rpm', 1500); if (rpm == null) return;
   const onGas = (fresh('iq', 2500) || 0) > 15 || (boostRel() || 0) > 0.3;
   if (shiftArmed && rpm >= CFG.shiftRpm && onGas) {
-    shiftArmed = false; beep('shift', 'shift');
+    shiftArmed = false; beep('shift', 'shift', 0, 'řaď');
     if (CFG.sound && CFG.snd.shift && curView === 'drive') flashShift();
   } else if (rpm < CFG.shiftRpm - 400) shiftArmed = true;
 }
@@ -131,11 +131,11 @@ window.onStatus = s => {
   const prev = S.state;
   S.state = s.state || (s.ok ? 'live' : 'idle'); S.stText = s.text || '';
   if (S.state === 'live' && prev !== 'live') {
-    if (prev !== 'faults' && prev !== 'cluster') beep('conn', 'conn', 3000);
+    if (prev !== 'faults' && prev !== 'cluster') beep('conn', 'conn', 3000, S.everLive ? 'Spojení obnoveno' : 'Připojeno, ' + PROFILE.short);
     S.everLive = true; S.liveSince = Date.now();
     if (CFG.autoRec && !REC.on && A && A.recStart) A.recStart();
   }
-  if (prev === 'live' && S.state === 'retry') beep('conn', 'lost', 3000);
+  if (prev === 'live' && S.state === 'retry') beep('conn', 'lost', 3000, 'Spojení se ztratilo');
   if (S.state === 'idle' && prev !== 'idle') {
     if (REC.on && CFG.autoRec && A && A.recStop) A.recStop();
     saveTrip(); saveHist(true); FLT.busy = null;
@@ -167,9 +167,10 @@ window.onGps = d => {
   if (!d || d.v == null) return;
   S.gpsV = d.v; S.gpsT = performance.now(); S.gpsAcc = d.acc;
   testsGps(d.v, d.t, performance.now());
+  routeGps(d);
 };
 window.onGpsState = m => { S.gpsState = m; };
-window.onAppPause = () => { saveTrip(); saveHist(true); KV.set('cfg', CFG); KV.set('pages', PAGES); };
+window.onAppPause = () => { trkSave(); saveTrip(); saveHist(true); KV.set('cfg', CFG); KV.set('pages', PAGES); };
 
 /* ---------- timers ---------- */
 let lastFrame = performance.now();
@@ -191,6 +192,8 @@ setInterval(() => {
   if (tickN % 4 === 0) {
     renderStatus();
     if (curView === 'trip' && tripMode === 'now' && !touching()) renderTripView(false);
+    if (curView === 'trip' && tripMode === 'route' && !TRK.view && tickN % 8 === 0 && !touching()) renderRoute(false);
+    if (tickN % 120 === 0) themeTick();
     if (curView === 'more' && moreSub === 'groups') renderGroups();
     if (REC.on) { const s = Math.floor((Date.now() - REC.start) / 1000); $('recTime').textContent = Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); }
   }
@@ -206,5 +209,6 @@ if (CFG.gps && A && A.gpsStart) A.gpsStart();
 renderStatus(); updateBadges(); pushPlan(true);
 requestAnimationFrame(frame);
 function afterPicker(){ if (!CFG.onboarded && !IS_DEMO) openGuide(); renderPageChips(); buildPage(); pushPlan(true); }
+themeTick();
 openPicker();
 if (IS_DEMO) setTimeout(() => A.connect(), 300);

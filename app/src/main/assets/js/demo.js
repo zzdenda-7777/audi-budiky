@@ -90,7 +90,16 @@
     setAddress(){}, setClusterOnConnect(b){ cluOn = !!b; }, setClusterPeriod(){},
     readClusterNow(){ cluNow = true; }, readFaults(u){ faultsReq = u === 0x17 ? 0x17 : 1; if (u === 0x17) setTimeout(() => call('onFaults', { u: 0x17, f: [] }), 2500); },
     beep(k){ (window.__beeps = window.__beeps || []).push(k); },
-    gpsStart(){ clearInterval(gpsTimer); call('onGpsState', 'GPS zapnutá'); gpsTimer = setInterval(() => call('onGps', { v: running ? car.speed : 0, acc: 4, t: Date.now() }), 200); },
+    say(t){ (window.__says = window.__says || []).push(t); try { const u = new SpeechSynthesisUtterance(t); u.lang = 'cs-CZ'; speechSynthesis.speak(u); } catch (_) {} },
+    ttsState(){ return 1; }, openTtsSettings(){}, setBrightness(v){ window.__bright = v; }, kvDel(k){ try { localStorage.removeItem('ab.' + k); } catch (_) {} },
+    gpsStart(){ clearInterval(gpsTimer); call('onGpsState', 'GPS zapnutá');
+      const pos = { lat: 50.0755, lon: 14.4378, hd: 0.6 };
+      gpsTimer = setInterval(() => {
+        const v = running ? car.speed : 0, m = v / 3.6 * 0.2;
+        pos.hd += 0.012 + (Math.random() - 0.5) * 0.02;
+        pos.lat += Math.cos(pos.hd) * m / 110540; pos.lon += Math.sin(pos.hd) * m / (111320 * Math.cos(pos.lat * Math.PI / 180));
+        call('onGps', { v, acc: 4, t: Date.now(), lat: pos.lat, lon: pos.lon });
+      }, 200); },
     gpsStop(){ clearInterval(gpsTimer); call('onGpsState', 'GPS vypnutá'); },
     version(){ return 'ukázka v prohlížeči'; },
     info(){ return JSON.stringify({ phone: 'Prohlížeč', android: '–', cable: 'ukázka', engineBaud: 9600, clusterBaud: 10400 }); },

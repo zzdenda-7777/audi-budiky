@@ -26,6 +26,8 @@ function onCarIdent(ident){
   const c = carObj(id);
   if (isNewCar) c.name = autoName(ident);
   c.ecu = ident; c.seen = Date.now(); if (S.cluIdent) c.clu = S.cluIdent;
+  const cy = /\b[RV]\s?(\d{1,2})\b/.exec(ident || ''); const cyl = cy ? +cy[1] : 0;
+  c.profile = (cyl && PROFILE.cyl !== cyl) ? (Object.values(PROFILES).find(p => p.cyl === cyl) || PROFILE).id : PROFILE.id;
   saveHist();
   startOrContinueTrip();
 }
@@ -38,7 +40,7 @@ function onCarCluster(){
 }
 function saveTest(id, res){
   const c = carObj(CAR || '_none');
-  const rec = { t: Date.now(), v: res.v, sum: res.sum || '', rows: res.rows || [] };
+  const rec = { t: Date.now(), v: res.v, sum: res.sum || '', rows: res.rows || [], num: res.num || null, prof: PROFILE.id };
   c.tests[id] = rec; c.log.unshift(Object.assign({ id }, rec)); c.log = c.log.slice(0, 40);
   saveHist(true);
 }
@@ -58,13 +60,16 @@ function saveFaults(unit, list){ if (!CAR) return; const c = carObj(CAR); c.faul
 
 /* ---------------- trip ---------------- */
 let TRIP = null, FUEL0 = null, tripSaveT = 0;
-function newTrip(){ return { id: Date.now(), car: CAR, start: Date.now(), last: Date.now(), km: 0, fuel: 0, maxBoost: 0, maxRpm: 0, maxSpd: 0, maxCool: 0, maxIq: 0, minAfr: null, odo0: any('odo') }; }
+function newTrip(){ return { id: Date.now(), car: CAR, start: Date.now(), last: Date.now(), km: 0, fuel: 0, maxBoost: 0, maxRpm: 0, maxSpd: 0, maxCool: 0, maxIq: 0, minAfr: null, odo0: any('odo'),
+  maxFuelT: 0, maxIat: null, voltSum: 0, voltN: 0, coldStart: null, warmSec: null, rateSum: 0, rateN: 0 }; }
 function tripSummary(t){
   return { id: t.id, car: t.car, start: t.start, end: t.last, km: +t.km.toFixed(2), fuel: +t.fuel.toFixed(3), avg: t.km > 0.5 ? +(t.fuel / t.km * 100).toFixed(2) : null,
-    cost: +(t.fuel * CFG.price).toFixed(1), maxBoost: t.maxBoost, maxRpm: t.maxRpm, maxSpd: t.maxSpd, maxCool: t.maxCool, maxIq: t.maxIq, minAfr: t.minAfr, odo0: t.odo0 };
+    cost: +(t.fuel * CFG.price).toFixed(1), maxBoost: t.maxBoost, maxRpm: t.maxRpm, maxSpd: t.maxSpd, maxCool: t.maxCool, maxIq: t.maxIq, minAfr: t.minAfr, odo0: t.odo0,
+    maxFuelT: t.maxFuelT || null, maxIat: t.maxIat, voltAvg: t.voltN ? +(t.voltSum / t.voltN).toFixed(2) : null, warmSec: t.warmSec, rateAvg: t.rateN ? +(t.rateSum / t.rateN).toFixed(1) : null, hasTrk: !!t.hasTrk, price: CFG.price };
 }
 function archiveTrip(t){
   if (!t) return;
+  if (typeof trkArchive === 'function' && trkArchive(t)) t.hasTrk = true;
   if (t.last - t.start >= 60000 || t.km >= 0.3) { HIST.trips = HIST.trips.filter(x => x.id !== t.id); HIST.trips.unshift(tripSummary(t)); HIST.trips = HIST.trips.slice(0, 300); saveHist(true); }
   KV.set('trip', null);
 }
@@ -74,7 +79,7 @@ function startOrContinueTrip(){
   if (saved) archiveTrip(saved);
   TRIP = newTrip(); KV.set('trip', TRIP);
 }
-function endTrip(){ archiveTrip(TRIP); TRIP = CAR ? newTrip() : null; FUEL0 = FUEL0 ? { l: fuelNow(), at: 0 } : null; if (TRIP) KV.set('trip', TRIP); }
+function endTrip(){ if (typeof trkSave === 'function') trkSave(); archiveTrip(TRIP); if (typeof TRK !== 'undefined') { TRK.tripId = null; TRK.pts = []; } TRIP = CAR ? newTrip() : null; FUEL0 = FUEL0 ? { l: fuelNow(), at: 0 } : null; if (TRIP) KV.set('trip', TRIP); }
 function saveTrip(){ if (TRIP) KV.set('trip', TRIP); }
 (function initTrip(){ const t = KV.get('trip', null); if (t && Date.now() - t.last >= 15 * 60000) archiveTrip(t); })();
 
@@ -103,6 +108,10 @@ function tripTick(dt){
   TRIP.maxSpd = Math.max(TRIP.maxSpd, sp || 0);
   TRIP.maxCool = Math.max(TRIP.maxCool, fresh('cool', 10000) || 0);
   const a = afr(), iq = fresh('iq', 3000) || 0; if (a != null && iq > 15) TRIP.minAfr = TRIP.minAfr == null ? a : Math.min(TRIP.minAfr, a);
+  const ft = fresh('fuelT', 10000); if (ft != null) TRIP.maxFuelT = Math.max(TRIP.maxFuelT || 0, ft);
+  const it = fresh('iat', 10000); if (it != null) TRIP.maxIat = TRIP.maxIat == null ? it : Math.max(TRIP.maxIat, it);
+  const vo = fresh('volt', 10000), rp = fresh('rpm', 3000) || 0; if (vo != null && rp > 700) { TRIP.voltSum = (TRIP.voltSum || 0) + vo; TRIP.voltN = (TRIP.voltN || 0) + 1; }
+  const rr = readRate(); if (rr) { TRIP.rateSum = (TRIP.rateSum || 0) + rr; TRIP.rateN = (TRIP.rateN || 0) + 1; }
   TRIP.last = Date.now();
   if (Date.now() - tripSaveT > 20000) { tripSaveT = Date.now(); saveTrip(); if (CAR) { const cc = carObj(CAR); cc.seen = Date.now(); if (fresh('cool', 10000) != null) cc.last.cool = fresh('cool', 10000); if (fuelNow() != null) cc.last.fuelL = fuelNow(); if (cc.last.odo != null && TRIP.odo0 != null) cc.last.odoNow = TRIP.odo0 + TRIP.km; saveHist(); } }
 }
@@ -114,9 +123,10 @@ function engineTick(dt){
   if (S.state !== 'live' || R.on) return;
   const cool = fresh('cool', 15000), rpm = fresh('rpm', 3000);
   if (cool != null) {
-    if (cool < 70) ENGST.wasCold = true;
-    if (ENGST.wasCold && cool >= 80) { ENGST.wasCold = false; ENGST.warmUntil = Date.now() + 8000; beep('warm', 'done'); }
-    if (cool < 60 && rpm != null && rpm > 2500) beep('warm', 'info', 45000);
+    if (cool < 70) { ENGST.wasCold = true; if (TRIP && TRIP.coldStart == null && TRIP.warmSec == null) TRIP.coldStart = Date.now(); }
+    if (ENGST.wasCold && cool >= 80 && TRIP && TRIP.coldStart != null && TRIP.warmSec == null) TRIP.warmSec = Math.round((Date.now() - TRIP.coldStart) / 1000);
+    if (ENGST.wasCold && cool >= 80) { ENGST.wasCold = false; ENGST.warmUntil = Date.now() + 8000; beep('warm', 'done', 0, 'Motor zahřátý'); }
+    if (cool < 60 && rpm != null && rpm > 2500) beep('warm', 'info', 45000, 'Studený motor, uber plyn');
   }
   const b = boostRel(), iq = fresh('iq', 3000);
   let L = null; if (b != null) L = b; if (iq != null) L = Math.max(L == null ? 0 : L, iq / 40 * 1.2);
@@ -124,7 +134,7 @@ function engineTick(dt){
   if (L != null && L > 0.5) ENGST.heat = Math.min(120, ENGST.heat + dt * (L - 0.5) * 8);
   else ENGST.heat = Math.max(0, ENGST.heat - dt * (idle ? 1 : 0.5));
   if (idle && ENGST.heat >= 10) ENGST.cd = true;
-  if (ENGST.cd && ENGST.heat <= 0.5) { ENGST.cd = false; if (idle) { ENGST.cdDoneUntil = Date.now() + 8000; beep('cool', 'done'); } }
+  if (ENGST.cd && ENGST.heat <= 0.5) { ENGST.cd = false; if (idle) { ENGST.cdDoneUntil = Date.now() + 8000; beep('cool', 'done', 0, 'Turbo vychladlé, můžeš vypnout motor'); } }
 }
 function engineBanners(){
   const out = [];
@@ -143,13 +153,15 @@ function engineBanners(){
 /* ---------------- Cesta view ---------------- */
 let tripMode = 'now', histCar = null, openTrip = null, delArm = 0;
 function initTripView(){
-  $('tripSeg').querySelectorAll('button').forEach(b => b.onclick = () => { tripMode = b.dataset.m; $('tripSeg').querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b)); renderTripView(true); });
+  $('tripSeg').querySelectorAll('button').forEach(b => b.onclick = () => { tripMode = b.dataset.m; if (tripMode === 'route' && typeof TRK !== 'undefined') { TRK.view = null; TRK.sel = null; } $('tripSeg').querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b)); renderTripView(true); });
 }
 function kvRows1(rows){ return kvRows(rows).replace('class="kv"', 'class="kv one"'); }
 function kvRows(rows){ return '<div class="kv">' + rows.map(r => '<div><span>' + r[0] + '</span><b>' + r[1] + '</b></div>').join('') + '</div>'; }
 function bigTile(lbl, val, unit, sub){ return '<div class="tile"><span class="lbl">' + lbl + '</span><span class="val"><span class="vv"><b class="num">' + val + '</b><small class="u">' + unit + '</small></span></span><span class="sub">' + (sub || '') + '</span></div>'; }
 function renderTripView(full){
   if (tripMode === 'hist') { if (full) renderHistory(); return; }
+  if (tripMode === 'route') { renderRoute(full); return; }
+  if (tripMode === 'cmp') { if (full) renderCompare(); return; }
   const T = TRIP, inst = l100(), lh = lph();
   const consV = inst != null ? fmt(inst, 1) : fmt(lh, 1), consU = inst != null ? 'l/100' : 'l/h';
   const cool = fresh('cool', 15000), warmP = cool == null ? 0 : Math.max(0, Math.min(1, (cool - 20) / 60));
@@ -196,12 +208,13 @@ function renderHistory(){
   if (fe || fc) h += '<div class="lbl2">Chybové kódy</div><div class="card">' + [['Motor', fe], ['Přístroje', fc]].filter(x => x[1]).map(x => '<div class="switch"><span class="sw-t">' + x[0] + '<small>' + dateTxt(x[1].t) + ' ' + timeTxt(x[1].t) + '</small></span><b>' + (x[1].list.length ? x[1].list.length + '× ' + x[1].list.slice(0, 3).map(f => String(f.c).padStart(5, '0')).join(', ') : 'žádné') + '</b></div>').join('') + '</div>';
   const trips = HIST.trips.filter(t => t.car === c.id).slice(0, 40);
   h += '<div class="lbl2">Jízdy</div>' + (trips.length ? '<div class="list">' + trips.map(t => '<button class="item" data-trip="' + t.id + '"><div class="tx"><div class="tt">' + dateTxt(t.start) + ' · ' + timeTxt(t.start) + '</div><div class="ds">' + fmt(t.km, 1) + ' km · ' + durTxt(t.end - t.start) + ' · ' + (t.avg != null ? fmt(t.avg, 1) + ' l/100' : fmt(t.fuel, 2) + ' l') + ' · max ' + fmt(t.maxBoost, 2) + ' bar</div>' +
-    (openTrip === t.id ? kvRows([['Spotřebováno', fmt(t.fuel, 2) + ' l'], ['Cena', fmt(t.cost, 0) + ' Kč'], ['Max otáčky', fmt(t.maxRpm, 0)], ['Max rychlost', fmt(t.maxSpd, 0) + ' km/h'], ['Max voda', t.maxCool ? fmt(t.maxCool, 0) + ' °C' : '–'], ['Max vstřik', fmt(t.maxIq, 1) + ' mg'], ['Nejbohatší směs', t.minAfr != null ? fmt(t.minAfr, 1) + ':1' : '–'], ['Stav km na začátku', t.odo0 != null ? fmt(t.odo0, 0) : '–']]) : '') +
+    (openTrip === t.id ? kvRows([['Spotřebováno', fmt(t.fuel, 2) + ' l'], ['Cena', fmt(t.cost, 0) + ' Kč'], ['Max otáčky', fmt(t.maxRpm, 0)], ['Max rychlost', fmt(t.maxSpd, 0) + ' km/h'], ['Max voda', t.maxCool ? fmt(t.maxCool, 0) + ' °C' : '–'], ['Max vstřik', fmt(t.maxIq, 1) + ' mg'], ['Nejbohatší směs', t.minAfr != null ? fmt(t.minAfr, 1) + ':1' : '–'], ['Zahřátí na 80 °C', t.warmSec != null ? durTxt(t.warmSec * 1000) : '–'], ['Napětí za chodu', t.voltAvg != null ? fmt(t.voltAvg, 1) + ' V' : '–'], ['Stav km na začátku', t.odo0 != null ? fmt(t.odo0, 0) : '–']]) + (t.hasTrk ? '<span class="btn small" role="button" data-route="' + t.id + '" style="margin-top:8px">Zobrazit trasu</span>' : '') : '') +
     '</div><span class="chev">' + (openTrip === t.id ? ICON.up : ICON.down) + '</span></button>').join('') + '</div>' : '<p class="note">Zatím žádná uložená jízda (ukládají se jízdy delší než minuta).</p>');
   h += '<div style="margin-top:18px"><button class="btn ghost wide" id="btnDelCar">' + (Date.now() - delArm < 4000 ? 'Opravdu smazat historii tohoto auta?' : 'Smazat historii tohoto auta') + '</button></div>';
   $('tripBody').innerHTML = h;
   $('tripBody').querySelectorAll('[data-car]').forEach(b => b.onclick = () => { histCar = b.dataset.car; openTrip = null; renderHistory(); });
   $('tripBody').querySelectorAll('[data-trip]').forEach(b => b.onclick = () => { openTrip = openTrip === +b.dataset.trip ? null : +b.dataset.trip; renderHistory(); });
+  $('tripBody').querySelectorAll('[data-route]').forEach(b => b.onclick = e => { e.stopPropagation(); openTripRoute(+b.dataset.route); });
   $('carName').onchange = e => { c.name = e.target.value.trim().slice(0, 24) || c.name; saveHist(true); };
   $('btnDelCar').onclick = () => {
     if (Date.now() - delArm < 4000) { delete HIST.cars[c.id]; HIST.trips = HIST.trips.filter(t => t.car !== c.id); saveHist(true); delArm = 0; histCar = null; renderHistory(); showToast('Historie smazána'); }

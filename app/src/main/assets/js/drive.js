@@ -194,7 +194,7 @@ function drawDial(cv, v, x, raw){
   ctx.fillText(unit, x0 + tw + r * 0.04, by);
   const dst = avail ? statusOf(v.id, raw) : null;
   if (dst) {
-    const sc = { ok: '#3ad584', warn: '#ffb01f', bad: '#ff4d4d', info: TH.blue }[dst[0]] || TH.muted;
+    const sc = STCOL[dst[0]] || TH.muted;
     ctx.font = '700 ' + Math.round(Math.max(12 * dpr, r * 0.11)) + 'px sans-serif-condensed, sans-serif';
     const ww = ctx.measureText(dst[1]).width, dot = r * 0.035, sy = by + r * 0.2;
     const sx = cx - (ww + dot * 3) / 2;
@@ -272,10 +272,11 @@ function openHud(){
     '<div class="hint" id="hudHint">Mobil polož pod čelní sklo · jas na maximum · klepnutím zavřeš</div>';
   o.hidden = false;
   o.onclick = closeHud;
+  applyBrightness();
   setTimeout(() => { const h = $('hudHint'); if (h) h.style.opacity = '0'; }, 4000);
   pushPlan();
 }
-function closeHud(){ D.hud = false; $('hud').hidden = true; pushPlan(); }
+function closeHud(){ D.hud = false; $('hud').hidden = true; pushPlan(); applyBrightness(); }
 function updateHud(dt){
   if (!D.hud) return;
   $('hud').querySelectorAll('.row').forEach(row => {
@@ -360,7 +361,7 @@ function flashShift(){ const f = $('flash'); f.classList.add('on'); setTimeout((
 
 /* ---------- mini chart: last 60 s, fixed scale, coloured bands, requested value, highest peak ---------- */
 const BANDCOL = { ok: 'rgba(58,213,132,0.11)', warn: 'rgba(255,176,31,0.15)', bad: 'rgba(255,61,61,0.16)', info: 'rgba(127,176,255,0.09)' };
-const STCOL = { ok: '#3ad584', warn: '#ffb01f', bad: '#ff4d4d', info: '#7fb0ff' };
+const STCOL = new Proxy({}, { get: (_, k) => ({ ok: TH.okc, warn: TH.warnc, bad: TH.badc, info: TH.blue })[k] });
 function drawTrend(cv, v, big){
   if (!cv) return;
   const dpr = fitCanvas(cv), ctx = cv.getContext('2d'), W = cv.width, H = cv.height; if (!W || !H) return;
