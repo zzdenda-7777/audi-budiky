@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Audi Budíky</title>
+<style>
+:root{
+  --bg:#060404; --panel:#110707; --line:#2a0d0b; --red:#ff4434; --red-dim:#8c1d16;
+  --text:#e9e1df; --muted:#8a7a77; --ok:#35d07f; --warn:#ffb020;
+  --mono:"DejaVu Sans Mono",ui-monospace,monospace;
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--text);font-family:system-ui,Roboto,"DejaVu Sans",sans-serif;-webkit-user-select:none;user-select:none}
+.app{display:flex;flex-direction:column;height:100%;padding:8px 10px;gap:8px}
+.bar{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.status{display:flex;align-items:center;gap:8px;font-size:15px;flex:1;min-width:0}
+.dot{width:12px;height:12px;border-radius:50%;background:#555;flex:none}
+.dot.ok{background:var(--ok);box-shadow:0 0 10px var(--ok)}
+.dot.busy{background:var(--warn);box-shadow:0 0 10px var(--warn)}
+#statusText{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#ident{color:var(--muted);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+button,select{background:#1b0b09;color:var(--text);border:1px solid var(--line);border-radius:10px;padding:10px 14px;font-size:15px}
+button.primary{background:var(--red);border-color:var(--red);color:#fff;font-weight:600}
+button:active{transform:translateY(1px)}
+.main{flex:1;display:grid;grid-template-columns:1.15fr 1fr;gap:8px;min-height:0}
+.card{background:radial-gradient(circle at 50% 35%,#1a0907,var(--panel) 70%);border:1px solid var(--line);border-radius:16px;padding:10px;min-width:0;min-height:0;position:relative}
+.gauge{display:flex;flex-direction:column;align-items:center;justify-content:center}
+#boost{width:100%;height:100%;max-height:100%}
+.tiles{display:grid;grid-template-columns:1fr 1fr;grid-template-rows:repeat(3,1fr);gap:8px;min-height:0}
+.tile{display:flex;flex-direction:column;justify-content:center;align-items:flex-start;padding:10px 14px}
+.tile .lbl{color:var(--muted);font-size:13px;letter-spacing:.04em;text-transform:uppercase}
+.tile .val{font-family:var(--mono);font-size:clamp(26px,5.2vw,48px);font-weight:700;color:var(--red);text-shadow:0 0 14px rgba(255,68,52,.45);font-variant-numeric:tabular-nums;line-height:1.1}
+.tile .val small{font-size:.42em;color:var(--red-dim);margin-left:4px;font-weight:600}
+.tile .sub{color:var(--muted);font-size:12px;font-family:var(--mono)}
+.tile.hot .val{color:var(--warn);text-shadow:0 0 14px rgba(255,176,32,.45)}
+.drawer{display:none;flex-direction:column;gap:8px;max-height:46%;min-height:0}
+.drawer.open{display:flex}
+.drawer .card{overflow:auto}
+table{width:100%;border-collapse:collapse;font-family:var(--mono);font-size:13px}
+td,th{padding:4px 6px;border-bottom:1px solid var(--line);text-align:left;white-space:nowrap}
+th{color:var(--muted);font-weight:500}
+#log{font-family:var(--mono);font-size:12px;white-space:pre-wrap;color:#c9b9b6;-webkit-user-select:text;user-select:text}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+input{background:#1b0b09;color:var(--text);border:1px solid var(--line);border-radius:10px;padding:10px;font-size:15px;font-family:var(--mono);width:16em}
+.peak{position:absolute;top:10px;right:14px;text-align:right;font-family:var(--mono);color:var(--muted);font-size:13px}
+.peak b{color:var(--red)}
+.demo{position:absolute;top:10px;left:14px;color:var(--warn);font-size:12px}
+@media (orientation:portrait){
+  .main{grid-template-columns:1fr;grid-template-rows:minmax(0,1.1fr) minmax(0,1fr)}
+}
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="bar">
+    <div class="status">
+      <span class="dot" id="dot"></span>
+      <div style="min-width:0">
+        <div id="statusText">Odpojeno</div>
+        <div id="ident">Zapoj kabel, zapni zapalování a klepni na Připojit</div>
+      </div>
+    </div>
+    <select id="mode" aria-label="Co číst">
+      <option value="11,11,11,1,11,11,11,3">Vše (turbo přednostně)</option>
+      <option value="11">Jen turbo (nejrychlejší)</option>
+      <option value="1,3,11">Vše rovnoměrně</option>
+      <option value="custom">Vlastní skupiny…</option>
+    </select>
+    <button id="btnConn" class="primary">Připojit</button>
+    <button id="btnMore">Data a log</button>
+  </div>
+
+  <div class="main">
+    <div class="card gauge">
+      <span class="demo" id="demo" hidden>UKÁZKA – smyšlená data</span>
+      <div class="peak">max <b id="peak">0.00</b> bar<br>požad. <span id="spec">–</span> bar</div>
+      <canvas id="boost" width="600" height="520" aria-label="Plnicí tlak turba"></canvas>
+    </div>
+    <div class="tiles">
+      <div class="card tile"><span class="lbl">Otáčky</span><span class="val" id="rpm">–<small>ot/min</small></span><span class="sub" id="rpmSub">&nbsp;</span></div>
+      <div class="card tile" id="tileCool"><span class="lbl">Chladicí kapalina</span><span class="val" id="cool">–<small>°C</small></span><span class="sub">skupina 001</span></div>
+      <div class="card tile"><span class="lbl">Vstřik paliva</span><span class="val" id="iq">–<small>mg</small></span><span class="sub">skupina 001</span></div>
+      <div class="card tile"><span class="lbl">Vzduch (MAF)</span><span class="val" id="maf">–<small>mg</small></span><span class="sub" id="mafSub">skupina 003</span></div>
+      <div class="card tile"><span class="lbl">Ventil turba N75</span><span class="val" id="n75">–<small>%</small></span><span class="sub">skupina 011</span></div>
+      <div class="card tile"><span class="lbl">Rychlost čtení</span><span class="val" id="rate">–<small>/s</small></span><span class="sub" id="rateSub">&nbsp;</span></div>
+    </div>
+  </div>
+
+  <div class="drawer" id="drawer">
+    <div class="row">
+      <input id="custom" placeholder="např. 11,1,3,4" inputmode="numeric" aria-label="Vlastní skupiny">
+      <button id="btnCustom">Použít skupiny</button>
+      <span style="color:var(--muted);font-size:13px">Hodnoty porovnej s VCDS-Lite. Vzorce jsou podle veřejných tabulek.</span>
+    </div>
+    <div class="card"><table><thead><tr><th>Skup.</th><th>Pole</th><th>Hodnota</th><th>Typ</th><th>a</th><th>b</th></tr></thead><tbody id="raw"></tbody></table></div>
+    <div class="card"><div id="log"></div></div>
+  </div>
+</div>
+
+<script>
+(function(){
+  const $ = id => document.getElementById(id);
+  const A = window.Android;
+  const state = { boost:0, boostShown:0, spec:null, peak:0, baseline:1000, rpm:0, groups:{}, reads:[], connected:false };
+
+  // ---------- gauge ----------
+  const cv = $('boost'), ctx = cv.getContext('2d');
+  const MAXB = 2.0;
+  function drawGauge(v){
+    const w = cv.width, h = cv.height, cx = w/2, cy = h*0.56, r = Math.min(w,h)*0.42;
+    ctx.clearRect(0,0,w,h);
+    const a0 = Math.PI*0.75, a1 = Math.PI*2.25;
+    const ang = x => a0 + (a1-a0)*Math.max(0,Math.min(1,x/MAXB));
+    ctx.lineCap='round';
+    ctx.lineWidth = r*0.13; ctx.strokeStyle = '#1e0806';
+    ctx.beginPath(); ctx.arc(cx,cy,r,a0,a1); ctx.stroke();
+    const g = ctx.createLinearGradient(cx-r,0,cx+r,0); g.addColorStop(0,'#6d130d'); g.addColorStop(1,'#ff4434');
+    ctx.strokeStyle = g; ctx.beginPath(); ctx.arc(cx,cy,r,a0,ang(Math.max(0,v))); ctx.stroke();
+    ctx.fillStyle='#8a7a77'; ctx.font = (r*0.11)+'px monospace'; ctx.textAlign='center'; ctx.textBaseline='middle';
+    for(let t=0;t<=MAXB+1e-9;t+=0.5){ const a=ang(t); ctx.fillText(t.toFixed(1), cx+Math.cos(a)*r*0.72, cy+Math.sin(a)*r*0.72); }
+    ctx.strokeStyle='#3a1410'; ctx.lineWidth=2;
+    for(let t=0;t<=MAXB+1e-9;t+=0.1){ const a=ang(t), l = (Math.round(t*10)%5===0)?0.16:0.08; ctx.beginPath(); ctx.moveTo(cx+Math.cos(a)*r*(1.09),cy+Math.sin(a)*r*(1.09)); ctx.lineTo(cx+Math.cos(a)*r*(1.09+l),cy+Math.sin(a)*r*(1.09+l)); ctx.stroke(); }
+    if(state.spec!=null){ const a=ang(state.spec); ctx.strokeStyle='#e9e1df'; ctx.lineWidth=4; ctx.beginPath(); ctx.moveTo(cx+Math.cos(a)*r*0.86,cy+Math.sin(a)*r*0.86); ctx.lineTo(cx+Math.cos(a)*r*1.14,cy+Math.sin(a)*r*1.14); ctx.stroke(); }
+    const an = ang(v); ctx.strokeStyle='#ff4434'; ctx.lineWidth=r*0.035;
+    ctx.beginPath(); ctx.moveTo(cx,cy); ctx.lineTo(cx+Math.cos(an)*r*0.9, cy+Math.sin(an)*r*0.9); ctx.stroke();
+    ctx.fillStyle='#ff4434'; ctx.beginPath(); ctx.arc(cx,cy,r*0.06,0,Math.PI*2); ctx.fill();
+    ctx.font='bold '+(r*0.34)+'px monospace'; ctx.fillStyle='#ff4434'; ctx.fillText(v.toFixed(2), cx, cy+r*0.42);
+    ctx.font=(r*0.11)+'px sans-serif'; ctx.fillStyle='#8c1d16'; ctx.fillText('bar přetlak · turbo', cx, cy+r*0.66);
+  }
+  function fit(){ const p=cv.parentElement; const s=Math.min(p.clientWidth,p.clientHeight); cv.width=Math.max(200,p.clientWidth*devicePixelRatio); cv.height=Math.max(200,(p.clientHeight-10)*devicePixelRatio); cv.style.width=p.clientWidth+'px'; cv.style.height=(p.clientHeight-10)+'px'; }
+  window.addEventListener('resize', fit); fit();
+  function loop(){ state.boostShown += (state.boost - state.boostShown)*0.18; drawGauge(state.boostShown); requestAnimationFrame(loop); }
+  requestAnimationFrame(loop);
+
+  // ---------- helpers ----------
+  const fmt = (v,d) => (v==null||isNaN(v)) ? '–' : Number(v).toFixed(d);
+  function setVal(id, v, d, unit){ $(id).innerHTML = fmt(v,d) + '<small>'+unit+'</small>'; }
+  function byType(f, t, nth){ let k=0; for(const x of f){ if(x.t===t){ if(k===(nth||0)) return x; k++; } } return null; }
+  function val(x){ return x && x.v!=null ? x.v : null; }
+
+  // ---------- data from Android ----------
+  window.onStatus = s => {
+    $('statusText').textContent = s.text;
+    state.connected = s.ok;
+    $('dot').className = 'dot ' + (s.ok ? 'ok' : (/Probouz|zkouším|Povol/.test(s.text) ? 'busy' : ''));
+    $('btnConn').textContent = (s.ok || /Probouz|zkouším/.test(s.text)) ? 'Odpojit' : 'Připojit';
+  };
+  window.onIdent = t => { $('ident').textContent = t || 'Řídicí jednotka motoru'; };
+  window.onLog = m => {
+    const el = $('log'); const ts = new Date().toLocaleTimeString();
+    el.textContent = (ts+'  '+m+'\n'+el.textContent).slice(0, 20000);
+  };
+  window.onGroup = d => {
+    const f = d.f || [];
+    state.groups[d.g] = f;
+    const now = performance.now(); state.reads.push(now); state.reads = state.reads.filter(t => now-t < 3000);
+    $('rate').innerHTML = (state.reads.length/3).toFixed(1)+'<small>/s</small>';
+    $('rateSub').textContent = 'poslední skupina '+String(d.g).padStart(3,'0')+' · '+d.ms+' ms';
+
+    const rpm = val(byType(f,1)); if(rpm!=null){ state.rpm=rpm; setVal('rpm', rpm, 0, 'ot/min'); }
+
+    if(d.g===11){
+      const p = f.filter(x=>x.t===18);
+      const spec = p.length>=2 ? val(p[0]) : null;
+      const act  = p.length>=2 ? val(p[1]) : (p.length ? val(p[0]) : null);
+      if(act!=null){
+        if(state.rpm>0 && state.rpm<1100 && act>850 && act<1100) state.baseline = Math.min(state.baseline, act);
+        const rel = (act - state.baseline)/1000;
+        state.boost = Math.max(0, rel);
+        if(rel > state.peak){ state.peak = rel; $('peak').textContent = rel.toFixed(2); }
+      }
+      if(spec!=null){ state.spec = Math.max(0,(spec - state.baseline)/1000); $('spec').textContent = state.spec.toFixed(2); }
+      const n = f[3]; if(n && n.v!=null) setVal('n75', n.v, 0, '%');
+    }
+    if(d.g===1){
+      const t = byType(f,5); if(t){ setVal('cool', t.v, 0, '°C'); $('tileCool').classList.toggle('hot', t.v>105); }
+      const iq = f[1]; if(iq && iq.v!=null) setVal('iq', iq.v, 1, 'mg');
+    }
+    if(d.g===3){
+      const spec = f[1], act = f[2];
+      if(act && act.v!=null) setVal('maf', act.v, 0, act.u.startsWith('mg')?'mg':act.u);
+      $('mafSub').textContent = 'požadováno ' + (spec&&spec.v!=null ? spec.v.toFixed(0) : '–') + ' · EGR ' + (f[3]&&f[3].v!=null ? f[3].v.toFixed(0)+' %' : '–');
+    }
+    renderRaw();
+  };
+  function renderRaw(){
+    if(!$('drawer').classList.contains('open')) return;
+    let h=''; Object.keys(state.groups).sort((a,b)=>a-b).forEach(g=>{
+      state.groups[g].forEach((x,i)=>{ h += '<tr><td>'+String(g).padStart(3,'0')+'</td><td>'+(i+1)+'</td><td>'+(x.v!=null? (Math.abs(x.v)<10? x.v.toFixed(2): x.v.toFixed(1))+' '+x.u : x.s)+'</td><td>'+x.t+'</td><td>'+x.a+'</td><td>'+x.b+'</td></tr>'; });
+    });
+    $('raw').innerHTML = h;
+  }
+
+  // ---------- controls ----------
+  $('btnConn').onclick = () => {
+    if(!A){ return; }
+    if($('btnConn').textContent==='Odpojit') A.disconnect(); else A.connect();
+  };
+  $('btnMore').onclick = () => { $('drawer').classList.toggle('open'); renderRaw(); setTimeout(fit,50); };
+  $('mode').onchange = e => {
+    const v = e.target.value;
+    if(v==='custom'){ $('drawer').classList.add('open'); $('custom').focus(); setTimeout(fit,50); return; }
+    try{ localStorage.setItem('plan', v); }catch(_){}
+    A && A.setPlan(v);
+  };
+  $('btnCustom').onclick = () => { const v = $('custom').value; if(v.trim()){ A && A.setPlan(v); try{ localStorage.setItem('plan', v); }catch(_){} } };
+  try{ const p = localStorage.getItem('plan'); if(p){ A && A.setPlan(p); const o=[...$('mode').options].find(o=>o.value===p); if(o) $('mode').value=p; else { $('mode').value='custom'; $('custom').value=p; } } }catch(_){}
+  if(A && A.version) onLog('Verze aplikace '+A.version());
+
+  // ---------- demo (preview in a normal browser) ----------
+  if(!A){
+    $('demo').hidden=false; onStatus({text:'Ukázka bez auta', ok:true}); onIdent('8E0907401T 2.5l V6 TDI');
+    let t=0; setInterval(()=>{ t+=0.25; const rpm=1500+1500*(0.5+0.5*Math.sin(t/3)); const b=1000+1200*Math.max(0,Math.sin(t/3));
+      onGroup({g:11,ms:180,f:[{t:1,a:200,b:Math.round(rpm/40),v:rpm,u:'ot/min',s:''},{t:18,a:250,b:0,v:b+40,u:'mbar',s:''},{t:18,a:250,b:0,v:b,u:'mbar',s:''},{t:33,a:100,b:60,v:62,u:'%',s:''}]});
+      if(Math.round(t*4)%8===0){ onGroup({g:1,ms:190,f:[{t:1,a:200,b:0,v:rpm,u:'ot/min',s:''},{t:39,a:0,b:0,v:22.4,u:'mg/zdvih',s:''},{t:6,a:0,b:0,v:1.62,u:'V',s:''},{t:5,a:0,b:0,v:89.6,u:'°C',s:''}]});
+        onGroup({g:3,ms:185,f:[{t:1,a:200,b:0,v:rpm,u:'ot/min',s:''},{t:39,a:0,b:0,v:820,u:'mg/zdvih',s:''},{t:39,a:0,b:0,v:812,u:'mg/zdvih',s:''},{t:23,a:0,b:0,v:12,u:'%',s:''}]}); }
+    },250);
+  }
+})();
+</script>
+</body>
+</html>
