@@ -30,6 +30,8 @@ object Clock {
 
 /** The unit answered, but at a different baud rate. */
 class BaudMismatch(val suggested: Int, msg: String) : IOException(msg)
+/** The unit answered with KWP2000 keywords: a newer protocol this app does not speak (yet). */
+class NotKw1281(msg: String) : IOException(msg)
 
 /** The unit did not answer the 5-baud wake-up at all. */
 class NoAnswer(msg: String) : IOException(msg)
@@ -164,6 +166,8 @@ class Kw1281(
         val kb1 = readByte(500)
         val kb2 = readByte(500)
         trace("← synchronizace OK za ${Clock.now() - t0} ms, klíčová slova ${hex(kb1)} ${hex(kb2)}, $curBaud Bd")
+        // KW1281 units send 01 8A. 8F xx means KWP2000 (newer units): don't pretend, say so.
+        if (kb1 == 0x8F) throw NotKw1281("Jednotka používá novější protokol KWP2000, ten aplikace zatím neumí")
         Clock.sleep(30)
         writeByte(kb2 xor 0xFF)
 

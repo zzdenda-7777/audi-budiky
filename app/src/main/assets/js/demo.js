@@ -93,7 +93,20 @@
     disconnect(){ running = false; clearTimeout(gTimer); clearTimeout(cTimer); status('Odpojeno', 'idle'); },
     setPlan(s){ const p = String(s).split(',').map(Number).filter(n => n >= 0); if (p.length) { plan = p; pi = 0; } },
     setAddress(){}, setClusterOnConnect(b){ cluOn = !!b; }, setClusterPeriod(){},
-    readClusterNow(){ cluNow = true; }, readFaults(u){ faultsReq = u === 0x17 ? 0x17 : 1; if (u === 0x17) setTimeout(() => call('onFaults', { u: 0x17, f: [] }), 2500); },
+    readClusterNow(){ cluNow = true; },
+    readUnit(addr, groups, secs){
+      if (!running) return; clearTimeout(gTimer); status(addr === 3 ? 'Čtu ABS…' : 'Čtu jednotku…', 'unit');
+      const t0 = Date.now(), k = [1.000, 1.001, 1.004, 0.999];  // left rear tyre a little soft
+      setTimeout(() => call('onUnitIdent', { a: addr, id: '8E0614517  ABS/ESP 5.7 FRONT  0001' }), 700);
+      const tick = () => {
+        if (!running) return;
+        if (Date.now() - t0 > secs * 1000 + 900) { call('onUnitDone', { a: addr, ok: true }); status('Živě', 'live'); gTimer = setTimeout(loop, 400); return; }
+        physics(0.25);
+        call('onGroup', { e: addr, g: 1, ms: 90, f: k.map(x => F(7, car.speed * x * (1 + (Math.random() - 0.5) * 0.002), 'km/h')) });
+        gTimer = setTimeout(tick, 250);
+      };
+      gTimer = setTimeout(tick, 1200);
+    }, readFaults(u){ faultsReq = u === 0x17 ? 0x17 : 1; if (u === 0x17) setTimeout(() => call('onFaults', { u: 0x17, f: [] }), 2500); },
     beep(k){ (window.__beeps = window.__beeps || []).push(k); },
     say(t, flush){ (window.__says = window.__says || []).push(t);
       try { if (flush) speechSynthesis.cancel(); const u = new SpeechSynthesisUtterance(t), v = demoVoice(); u.lang = 'cs-CZ'; if (v) u.voice = v;
@@ -121,6 +134,7 @@
       call('onLog', { k: 'engine-drop', m: 'Spojení s motorem spadlo: Vypršel čas, jednotka přestala odpovídat (rozpracovaný blok: 0F 2A E7)', ctx: ['17:20:01.120  skupina 011 OK 181 ms', '17:20:01.310  skupina 001 OK 176 ms'] });
       setTimeout(() => { call('onLog', { k: 'engine-noanswer', m: 'Jednotka motoru neodpovídá. Zapnuté zapalování? Po výpadku spojení jednotka někdy až 20 s nereaguje.', ctx: ['17:20:05.000  → probouzím adresu 01 (5 Bd), linka 9600 Bd', '17:20:09.500  ← místo synchronizace: 00 00'] }); status('Motor neodpovídá – je zapnuté zapalování?', 'retry'); }, 3000);
       setTimeout(() => { if (!running) return; status('Živě', 'live'); loop(); }, 7000); },
+    _cold(){ car.cool = 12; },
     _unplug(){ running = false; clearTimeout(gTimer); status('Kabel odpojen', 'idle'); },
     recStart(){ call('onRec', { on: true, name: 'jizda_ukazka.csv' }); }, recStop(){ call('onRec', { on: false, msg: '1234 řádků · Stažené soubory/AudiDiag/jizda_ukazka.csv' }); },
     shareLastRec(){}, shareRec(){},

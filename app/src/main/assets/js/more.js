@@ -99,12 +99,13 @@ function readFaultsNow(unit, done){
    Only one job runs; the others wait. The engine stream pauses for the job and then carries on,
    so two requests never collide and units are never switched back and forth. */
 const UQ = { list: [], cur: null, t: 0 };
-const UQ_TIMEOUT = { faults: 18000, cluster: 30000 };
-function unitJob(kind, unit, done){
+const UQ_TIMEOUT = { faults: 18000, cluster: 30000, unit: 30000 };
+function unitJob(kind, unit, done, opts){
   if (!A) return false;
+  if (kind === 'unit' && !A.readUnit) { if (done) done(false); return false; }
   const same = (UQ.cur && UQ.cur.kind === kind && UQ.cur.unit === unit) ? UQ.cur : UQ.list.find(j => j.kind === kind && j.unit === unit);
   if (same) { if (done) same.cbs.push(done); return true; }
-  UQ.list.push({ kind, unit, cbs: done ? [done] : [] });
+  UQ.list.push({ kind, unit, cbs: done ? [done] : [], opts: opts || {} });
   unitNext();
   return true;
 }
@@ -113,6 +114,7 @@ function unitNext(){
   const j = UQ.cur = UQ.list.shift(); UQ.t = Date.now();
   if (j.kind === 'faults') { FLT.busy = j.unit === CLU ? 'clu' : 'eng'; A.readFaults(j.unit); }
   else if (j.kind === 'cluster') A.readClusterNow();
+  else if (j.kind === 'unit') { UQ.lastErr = ''; A.readUnit(j.unit, (j.opts.groups || [1]).join(','), j.opts.secs || 10); }
 }
 function unitDone(kind, unit, ok){
   const j = UQ.cur; if (!j || j.kind !== kind || (unit != null && j.unit !== unit)) return;
@@ -120,8 +122,9 @@ function unitDone(kind, unit, ok){
   j.cbs.forEach(cb => { try { cb(ok); } catch (_) {} });
   setTimeout(unitNext, 400);
 }
+const unitName = a => ({ 3: 'ABS', 8: 'klimatizace', 0x15: 'airbag', 2: 'převodovky' })[a] || ('0x' + a.toString(16));
 function unitWatch(){
-  const j = UQ.cur; if (!j || Date.now() - UQ.t < UQ_TIMEOUT[j.kind]) return;
+  const j = UQ.cur; if (!j || Date.now() - UQ.t < UQ_TIMEOUT[j.kind] + (j.kind === 'unit' ? (j.opts.secs || 10) * 1000 : 0)) return;
   if (j.kind === 'faults') {
     const key = j.unit === CLU ? 'clu' : 'eng';
     if (FLT.busy === key) FLT.busy = null;
@@ -130,7 +133,7 @@ function unitWatch(){
   }
   unitDone(j.kind, j.unit, false);
 }
-function unitBusyText(){ const j = UQ.cur; return j ? (j.kind === 'cluster' ? 'Čtu přístrojový panel' : j.unit === CLU ? 'Čtu chyby panelu' : 'Čtu chyby motoru') + (UQ.list.length ? ' (další ' + UQ.list.length + ' čeká)' : '') : ''; }
+function unitBusyText(){ const j = UQ.cur; return j ? (j.kind === 'unit' ? 'Čtu jednotku ' + unitName(j.unit) : j.kind === 'cluster' ? 'Čtu přístrojový panel' : j.unit === CLU ? 'Čtu chyby panelu' : 'Čtu chyby motoru') + (UQ.list.length ? ' (další ' + UQ.list.length + ' čeká)' : '') : ''; }
 
 /* ---------- recordings ---------- */
 function onRecState(s){

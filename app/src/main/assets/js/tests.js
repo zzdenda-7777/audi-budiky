@@ -49,6 +49,10 @@ function testDone(id){
 }
 
 const TST = { cur: null, st: 'ready', d: null, res: null, msg: '' };
+/* wheel order as the ABS unit reports it */
+const WHEELS = ['Levé přední', 'Pravé přední', 'Levé zadní', 'Pravé zadní'];
+/* data from another unit (ABS…) goes to the running test */
+function onUnitData(e, g, f){ const t = TST.cur; if (t && t.data && (TST.st === 'run' || TST.st === 'wait')) { try { t.data(e, g, f); } catch (_) {} } }
 /* fault codes that point at the injection pump */
 const PUMP_CODES = [550, 1268];
 const median = a => { if (!a.length) return null; const b = a.slice().sort((x, y) => x - y), m = b.length >> 1; return b.length % 2 ? b[m] : (b[m - 1] + b[m]) / 2; };
@@ -113,7 +117,7 @@ const TESTS = [
         if (spec != null && spec > 0.6) { TST.st = 'run'; d.t0 = clock(); TST.msg = 'Měřím… drž plný plyn'; beep('timing', 'start', 0, 'Start'); }
         return;
       }
-      if (isNew('boostAbs', d.last) && spec != null && act != null) { d.last = M.boostAbs.t; d.s.push({ t: clock() - d.t0, rpm, spec, act }); }
+      if (isNew('boostAbs', d.last) && spec != null && act != null) { d.last = M.boostAbs.t; d.s.push({ t: clock() - d.t0, rpm, spec, act, duty: fresh('n75', 2000) }); }
       if (spec != null && spec < 0.35) { if (!d.low) d.low = clock(); } else d.low = 0;
       if ((d.low && clock() - d.low > 600) || (rpm || 0) > 4400 || clock() - d.t0 > 25000) this.finish();
     },
@@ -134,6 +138,13 @@ const TESTS = [
         v = 'mid'; kind = (spool != null && spool > 3) ? 'slow' : 'loose';
         why = kind === 'slow' ? 'Turbo se nabuzuje pomalu. Může jít o začínající zanesení VNT nebo menší netěsnost.' : 'Tlak se drží jen přibližně. Zatím ne vážné, sleduj to.';
       }
+      /* N75 duty at full boost = how much regulation reserve is left (more duty = vanes closed more = more boost) */
+      const hiS = s.filter(p => p.duty != null && p.spec >= maxSpec * 0.85).map(p => p.duty).sort((a, b) => a - b);
+      const dutyHi = hiS.length >= 3 ? hiS[Math.min(hiS.length - 1, Math.floor(hiS.length * 0.9))] : null;
+      if ((kind === 'under' || kind === 'never') && dutyHi != null) kind = dutyHi >= 88 ? 'leak' : dutyHi < 70 ? 'reg' : kind;
+      if (v === 'ok' && dutyHi != null && dutyHi >= 90) { v = 'mid'; kind = 'reserve'; why = 'Tlak drží, ale regulace už jede skoro naplno (N75 ' + fmt(dutyHi, 0) + ' %). Turbo má malou rezervu – začínající netěsnost sání nebo opotřebení.'; }
+      if (kind === 'leak') why += ' Ventil N75 přitom jede na ' + fmt(dutyHi, 0) + ' % – regulace dělá maximum, takže tlak někudy uniká nebo turbo nestačí.';
+      if (kind === 'reg') why += ' Ventil N75 přitom jede jen na ' + fmt(dutyHi, 0) + ' % – turbo nedostává pořádný povel, problém je spíš v regulaci.';
       const und = worst != null ? Math.max(0, -worst) : null, ov = over != null ? Math.max(0, over) : null;
       const head = {
         '': 'Turbo dělá, co má. Tlak se drží požadavku' + (spool != null ? ' a nabíhá za ' + fmt(spool, 1) + ' s.' : '.'),
@@ -141,19 +152,26 @@ const TESTS = [
         loose: 'Turbo funguje, jen tlak drží méně přesně. Zatím nic vážného, sleduj to.',
         never: 'Turbo vůbec nedosáhlo tlaku, který jednotka chce.',
         over: 'Turbo fouká víc, než jednotka chce (přetlak).',
-        under: 'Turbo nedodává požadovaný tlak (nedotlak).' }[kind];
-      const todo = v === 'ok' ? ['Nic, turbo je v pořádku.', 'Test zopakuj jednou za pár měsíců, ať vidíš, jestli se něco nemění.']
+        under: 'Turbo nedodává požadovaný tlak (nedotlak).',
+        leak: 'Turbo nedodá tlak, i když regulace jede naplno (N75 ' + fmt(dutyHi, 0) + ' %) – nejspíš netěsnost sání nebo opotřebené turbo.',
+        reg: 'Turbo nedodá tlak a regulace přitom nejede naplno (N75 jen ' + fmt(dutyHi, 0) + ' %) – spíš ventil N75, jeho podtlak nebo zaseklé lopatky VNT.',
+        reserve: 'Tlak drží, ale regulace už jede skoro naplno – turbo má malou rezervu.' }[kind];
+      let todo = v === 'ok' ? ['Nic, turbo je v pořádku.', 'Test zopakuj jednou za pár měsíců, ať vidíš, jestli se něco nemění.']
         : v === 'mid' ? ['Zopakuj test na zahřátém motoru, ať víš, že to nebyla náhoda.', 'Prohlédni hadice turba a intercooleru – mastné místo nebo povolená spona znamená netěsnost.', 'Když se to bude zhoršovat, nech zkontrolovat ventil N75 a lopatky VNT (zanesení).']
         : kind === 'over' ? ['Lopatky VNT se nejspíš zasekávají – pomáhá vyčištění nebo repase geometrie turba.', 'Zkontroluj ventil N75 a jeho podtlakové hadičky.', 'Načti chybové kódy – při přetlaku jednotka často přejde do nouzového režimu.']
         : ['Prohlédni hadice a spony mezi turbem, intercoolerem a sáním – mastné místo znamená netěsnost.', 'Zkontroluj ventil N75 a podtlakové hadičky k turbu (prasklá hadička = žádný tlak).', 'Když je sání těsné, nech zkontrolovat lopatky VNT nebo samotné turbo.'];
-      TST.res = { v, why, head, todo, rows: [['Max turbo', fmt(maxAct, 2) + ' bar'], ['Max požadováno', fmt(maxSpec, 2) + ' bar'], ['Průměrná odchylka', (meanDev != null ? (meanDev >= 0 ? '+' : '') + fmt(meanDev, 2) : '–') + ' bar'], ['Nabuzení', spool != null ? fmt(spool, 1) + ' s' : 'nedosáhlo'], ['Měření', s.length + '×']],
+      if (kind === 'leak') todo = ['Hledej netěsnost: hadice a spony mezi turbem, intercoolerem a sáním, prasklý intercooler. Mastné místo prozradí únik.', 'Když je sání těsné, nech zkontrolovat turbo (vůle, zanesené lopatky VNT).'];
+      if (kind === 'reg') todo = ['Zkontroluj podtlakové hadičky k ventilu N75 a k turbu – prasklá hadička znamená, že turbo nedostane povel.', 'Zkontroluj podtlak z vývěvy a samotný ventil N75.', 'Když je to v pořádku, lopatky VNT se nejspíš zasekávají – pomáhá vyčištění.'];
+      if (kind === 'reserve') todo = ['Zatím jezdi normálně a test zopakuj za pár týdnů.', 'Prohlédni hadice turba a intercooleru, jestli nejsou mastné nebo povolené.'];
+      TST.res = { v, why, head, todo, rows: [['Max turbo', fmt(maxAct, 2) + ' bar'], ['Max požadováno', fmt(maxSpec, 2) + ' bar'], ['Průměrná odchylka', (meanDev != null ? (meanDev >= 0 ? '+' : '') + fmt(meanDev, 2) : '–') + ' bar'], ['Nabuzení', spool != null ? fmt(spool, 1) + ' s' : 'nedosáhlo'], ['N75 při plném tlaku', dutyHi != null ? fmt(dutyHi, 0) + ' %' : 'nehlásí'], ['Měření', s.length + '×']],
         sum: 'max ' + fmt(maxAct, 2) + ' / ' + fmt(maxSpec, 2) + ' bar', chart: { xs: s.map(p => p.rpm), a: sortX(s.map(p => [p.rpm, p.spec])), b: sortX(s.map(p => [p.rpm, p.act])) } };
-      TST.res.num = { maxAct, maxSpec, meanDev, spool };
+      TST.res.num = { maxAct, maxSpec, meanDev, spool, dutyHi };
       finishGrade(TST.res, [
         { n: 'Drží požadovaný tlak', val: meanDev != null ? sgn(meanDev, 2) + ' bar' : 'nedosáhlo', norm: 'odchylka do ±0,10 bar', s: si < 0 ? 0 : sc(Math.abs(meanDev), [[0, 100], [0.05, 90], [0.10, 72], [0.20, 50], [0.30, 25], [0.5, 0]]), w: 3 },
         { n: 'Největší propad pod požadavek', val: und != null ? '−' + fmt(und, 2) + ' bar' : '–', norm: 'do 0,20 bar', s: si < 0 ? 0 : sc(und, [[0, 100], [0.1, 88], [0.2, 70], [0.3, 50], [0.45, 20], [0.7, 0]]), w: 2 },
         { n: 'Přetlak nad požadavek', val: ov != null ? '+' + fmt(ov, 2) + ' bar' : '–', norm: 'do 0,15 bar', s: sc(ov, [[0, 100], [0.08, 90], [0.15, 70], [0.25, 50], [0.4, 10]]), w: 2 },
-        { n: 'Nabuzení turba', val: spool != null ? fmt(spool, 1) + ' s' : 'nedosáhlo', norm: 'do 3 s', s: spool == null ? 0 : sc(spool, [[0.5, 100], [1.5, 88], [2.5, 76], [3, 70], [4, 50], [6, 15]]), w: 1 }
+        { n: 'Nabuzení turba', val: spool != null ? fmt(spool, 1) + ' s' : 'nedosáhlo', norm: 'do 3 s', s: spool == null ? 0 : sc(spool, [[0.5, 100], [1.5, 88], [2.5, 76], [3, 70], [4, 50], [6, 15]]), w: 1 },
+        { n: 'Rezerva regulace (N75)', val: dutyHi != null ? fmt(dutyHi, 0) + ' % při plném tlaku' : 'nehlásí', norm: 'do 80 %', s: dutyHi != null ? sc(dutyHi, [[40, 100], [70, 92], [80, 70], [90, 50], [97, 15]]) : null, w: 1 }
       ]);
       testDone('turbo');
     },
@@ -274,7 +292,7 @@ const TESTS = [
         : v === 'mid' ? ['Zopakuj test na zahřátém motoru se vším vypnutým (klima, světla).', 'Sleduj válec ' + badList + ' – když se hodnota bude zvětšovat, vstřikovač slábne.']
         : ['Prohoď vstřikovač z válce ' + badList + ' s jiným válcem a změř znovu.', 'Když chyba půjde s vstřikovačem, je vadný on. Když zůstane na válci, nech změřit kompresi.'];
       TST.res = { v, why, head, todo, cyl: a.map(x => x == null ? 0 : x), rows: a.map((x, i) => ['Válec ' + (i + 1), x == null ? '–' : (x > 0 ? '+' : '') + fmt(x, 2) + ' mg']).concat([['Norma', '±' + fmt(okL, 1) + ' mg']]), sum: 'nejhorší ±' + fmt(worst, 2) + ' mg' };
-      TST.res.num = { worst, lim: okL };
+      TST.res.num = { worst, lim: okL, cyl: a.map(x => x == null ? null : +x.toFixed(2)) };
       const isRef = i => S.cyl > 4 && i === 2;
       finishGrade(TST.res, a.map((x, i) => ({ n: 'Válec ' + (i + 1) + (isRef(i) ? ' (referenční)' : ''), val: x == null ? '–' : sgn(x, 2) + ' mg', norm: '±' + fmt(okL, 1) + ' mg',
         s: x == null || isRef(i) ? null : sc(Math.abs(x), [[0, 100], [okL * 0.4, 92], [okL, 70], [warnL, 50], [warnL * 1.5, 20], [warnL * 2, 0]]), w: 1 })));
@@ -437,6 +455,122 @@ const TESTS = [
     },
     chart(cv, c){ const pad = Math.max(1, (c.hi - c.lo) * 0.3); drawXY(cv, [{ pts: c.a, color: TH.text, w: 1.5 }, { pts: c.b, color: TH.red }], [1000, 4500], [Math.floor(c.lo - pad), Math.ceil(c.hi + pad)], v => fmt(v / 1000, 1) + 'k', v => fmt(v, 1)); },
     legend: '<span class="k"><i style="background:#efe6e3"></i>požadovaný</span> <span class="k"><i style="background:#ff3d2e"></i>skutečný</span> · předvstřik ° podle otáček'
+  },
+
+  /* ---------- wheels and ABS: all four wheel speeds from the ABS unit ---------- */
+  { id: 'wheels', name: 'Kola a ABS', sayName: 'Kola', ds: 'Porovná rychlost všech čtyř kol – podhuštěná nebo ojetá pneumatika, vadné čidlo ABS', need: () => [],
+    block: () => S.state !== 'live' ? 'Nejdřív se připoj k autu.' : !(A && A.readUnit) ? 'Tahle verze aplikace jednotku ABS číst neumí.' : '',
+    steps: () => ['Jeď rovně po rovné silnici stálou rychlostí 50–90 km/h.', 'Spusť test. Aplikace se asi na 25 s přepne na jednotku ABS (motor se mezitím nečte) a pak se sama vrátí.',
+      'Během měření nezatáčej, nebrzdi a nepřidávej prudce.', 'Na jedné nápravě by měly být stejné pneumatiky.'],
+    live: () => { const w = TST.d && TST.d.s.length ? TST.d.s[TST.d.s.length - 1] : null; return WHEELS.map((n, i) => [n, w && w[i] != null ? fmt(w[i], 1) : '–', 'km/h']); },
+    start(){
+      const d = TST.d = { s: [], t0: clock(), done: false };
+      TST.st = 'run'; TST.msg = 'Přepínám na jednotku ABS…'; beep('timing', 'start', 0, 'Start');
+      unitJob('unit', 3, ok => { d.done = true; d.ok = ok; d.err = UQ.lastErr; }, { groups: [1], secs: 25 });
+    },
+    data(e, g, f){
+      if (e !== 3 || g !== 1) return;
+      const v = f.filter(x => x.t === 7 || /km\/h/.test(x.u || '')).map(x => x.v);
+      if (v.length >= 4) TST.d.s.push(v.slice(0, 4));
+    },
+    tick(){
+      const d = TST.d; d.prog = Math.min(1, (clock() - d.t0) / 32000);
+      if (S.state === 'unit') TST.msg = d.s.length ? 'Měřím kola… jeď rovně (' + d.s.length + ')' : 'Připojuji jednotku ABS…';
+      if (d.done) this.finish();
+    },
+    finish(){
+      const d = TST.d, ok = d.s.filter(w => w.every(x => x != null) && median(w) > 30);
+      if (ok.length < 8) {
+        TST.st = 'ready';
+        TST.msg = d.err ? 'Jednotku ABS se nepodařilo přečíst: ' + d.err : d.s.length ? 'Málo dat nad 30 km/h. Jeď rychleji a rovně.' : 'Jednotka ABS rychlost kol nehlásí (skupina 001).';
+        return;
+      }
+      /* each wheel against the median of all four, per reading; the median over the whole run ignores short bends */
+      const dev = [0, 1, 2, 3].map(i => ok.map(w => (w[i] / median(w) - 1) * 100));
+      const dm = dev.map(a => median(a)), noise = dev.map((a, i) => median(a.map(x => Math.abs(x - dm[i]))));
+      const front = (dm[0] + dm[1]) / 2, rear = (dm[2] + dm[3]) / 2, axle = front - rear;
+      const dead = [0, 1, 2, 3].filter(i => d.s.filter(w => w[i] != null && w[i] < 2 && median(w) > 30).length > d.s.length * 0.2);
+      const worstI = dm.reduce((b, x, i) => Math.abs(x) > Math.abs(dm[b]) ? i : b, 0), worst = Math.abs(dm[worstI]), noisy = noise.map((n, i) => [n, i]).filter(x => x[0] > 0.8);
+      const bad = [], mid = []; let kind = 'ok';
+      if (dead.length) { bad.push('čidlo kola ' + dead.map(i => WHEELS[i].toLowerCase()).join(', ') + ' nedává signál'); kind = 'sensor'; }
+      if (noisy.length) { (noisy.some(x => x[0] > 1.5) ? bad : mid).push('čidlo kola ' + noisy.map(x => WHEELS[x[1]].toLowerCase()).join(', ') + ' skáče'); if (kind === 'ok') kind = 'sensor'; }
+      if (!dead.includes(worstI)) {
+        const txt = WHEELS[worstI].toLowerCase() + ' kolo se točí o ' + fmt(worst, 1) + ' % ' + (dm[worstI] > 0 ? 'rychleji' : 'pomaleji') + ' než ostatní';
+        if (worst > 2) { bad.push(txt); if (kind === 'ok') kind = 'tyre'; } else if (worst > 0.8) { mid.push(txt); if (kind === 'ok') kind = 'tyre'; }
+      }
+      if (Math.abs(axle) > 1.0) mid.push('přední a zadní náprava se liší o ' + fmt(Math.abs(axle), 1) + ' %');
+      const v = bad.length ? 'bad' : mid.length ? 'mid' : 'ok';
+      const head = v === 'ok' ? 'Všechna kola se točí stejně – pneumatiky i čidla ABS jsou v pořádku.' : (v === 'mid' ? 'Skoro v pořádku, ale ' : 'Pozor: ') + bad.concat(mid).join('; ') + '.';
+      const why = 'Jednotka ABS měří rychlost každého kola. Kolo, které se točí rychleji, má menší obvod: bývá podhuštěné nebo víc sjeté. Kolo, které se točí pomaleji, je přehuštěné nebo má novější či jiný rozměr pneumatiky. ' +
+        'Čidlo, které skáče nebo vypadává, bývá zanesené, má poškozený kabel nebo zubový kroužek. Pořadí kol je podle jednotky ABS (levé přední, pravé přední, levé zadní, pravé zadní). Krátké zatáčky výsledek nezkreslí, počítá se střed všech měření.';
+      const todo = v === 'ok' ? ['Nic, kola i čidla jsou v pořádku.'] : kind === 'sensor'
+        ? ['Zkontroluj kabel a konektor čidla ABS u toho kola (bývá přetržený nebo zkorodovaný).', 'Vyndej a vyčisti čidlo, podívej se na zubový kroužek, jestli není prasklý nebo zarezlý.', 'Načti chyby jednotky ABS ve VCDS-Lite.']
+        : ['Zkontroluj tlak v pneumatikách podle štítku ve dveřích nebo na víčku nádrže.', 'Porovnej hloubku dezénu – na jedné nápravě by měla být stejná.', Math.abs(axle) > 1.0 ? 'U pohonu quattro dávej na obě nápravy pneumatiky stejného rozměru a podobně sjeté – rozdíl zatěžuje mezinápravový diferenciál.' : 'Po úpravě tlaku test zopakuj.'];
+      TST.res = { v, why, head, todo,
+        rows: WHEELS.map((n, i) => [n, sgn(dm[i], 2) + ' % (neklid ' + fmt(noise[i], 2) + ' %)']).concat([['Přední proti zadní', sgn(axle, 2) + ' %'], ['Průměrná rychlost', fmt(avg(ok.map(w => median(w))), 0) + ' km/h'], ['Měření', ok.length + '×']]),
+        sum: 'nejvíc ' + sgn(dm[worstI], 1) + ' % (' + WHEELS[worstI].toLowerCase() + ')' };
+      TST.res.num = { worst, axle, dm };
+      const m = WHEELS.map((n, i) => ({ n: n + ' kolo', val: dead.includes(i) ? 'bez signálu' : sgn(dm[i], 2) + ' %', norm: 'do ±0,8 %', s: dead.includes(i) ? 0 : sc(Math.abs(dm[i]), [[0, 100], [0.3, 92], [0.8, 70], [2, 50], [4, 20], [8, 0]]), w: 1 }));
+      m.push({ n: 'Přední proti zadní náprava', val: sgn(axle, 2) + ' %', norm: 'do ±1 %', s: sc(Math.abs(axle), [[0, 100], [0.5, 85], [1, 70], [2, 50], [4, 20]]), w: 1 });
+      m.push({ n: 'Klid čidel ABS', val: 'nejvíc ' + fmt(Math.max(...noise), 2) + ' %', norm: 'do 0,8 %', s: sc(Math.max(...noise), [[0, 100], [0.3, 90], [0.8, 70], [1.5, 50], [3, 15]]), w: 1 });
+      finishGrade(TST.res, m);
+      testDone('wheels');
+    }
+  },
+
+  /* ---------- cold start and glow plugs ----------
+     A dead glow plug only shows right after a cold start: that cylinder fires badly, the ECU gives it more fuel
+     and its smooth-running value sticks out. Once warm the difference disappears. */
+  { id: 'cold', name: 'Studený start a žhavení', sayName: 'Studený start', ds: 'Klidný chod válců hned po studeném startu – odhalí slabou žhavicí svíčku', need: () => S.cyl > 4 ? [[13], [14]] : [[13]],
+    steps: () => ['Motor musí být studený – auto stálo aspoň 4 hodiny, nejlépe přes noc.', 'Zapni zapalování, připoj se a spusť test. Nestartuj, dokud to aplikace neřekne.',
+      'Po povelu nastartuj a nech motor 90 s na volnoběhu. Nic nezapínej a nepřidávej plyn.', 'Při startování spojení na chvíli spadne, aplikace se připojí sama.'],
+    live: () => [['Voda', fmt(fresh('cool', 15000), 0), '°C'], ['Otáčky', fmt(fresh('rpm', 4000), 0), ''], ['Čas po startu', TST.d && TST.d.ts ? fmt((clock() - TST.d.ts) / 1000, 0) : '–', 's']],
+    start(){
+      const rpm = fresh('rpm', 4000), cool = fresh('cool', 15000);
+      if (rpm != null && rpm > 400 && cool != null && cool > 45) { TST.st = 'ready'; TST.msg = 'Motor už běží a je teplý (' + fmt(cool, 0) + ' °C). Tenhle test musí začít za studena.'; return; }
+      TST.d = { ph: rpm != null && rpm > 400 ? 'cold' : 'off', cool0: cool, acc: [], last: 0, ts: rpm != null && rpm > 400 ? clock() : null, dips: 0, rpmS: [] };
+      if (TST.d.ph === 'off') { TST.st = 'wait'; TST.msg = 'Teď nastartuj.'; beep('timing', 'start', 0, 'Teď nastartuj'); }
+      else { TST.st = 'run'; TST.msg = 'Motor běží, měřím…'; beep('timing', 'start', 0, 'Start'); }
+    },
+    tick(){
+      const d = TST.d, rpm = fresh('rpm', 3000);
+      if (d.ph === 'off') { if (rpm != null && rpm > 500) { d.ph = 'cold'; d.ts = clock(); TST.st = 'run'; TST.msg = 'Nastartováno – volnoběh, nic nepřidávej…'; } if (d.cool0 == null) d.cool0 = fresh('cool', 15000); return; }
+      const t = (clock() - d.ts) / 1000, g = S.smooth[13];
+      if (rpm != null && rpm > 400) d.rpmS.push(rpm);
+      if (g && g.t !== d.last && t > 8) { d.last = g.t; TESTBY.smooth.cyls().forEach(x => { if (x.ref) return; (d.acc[x.c - 1] = d.acc[x.c - 1] || []).push({ t, v: x.v }); }); }
+      d.prog = Math.min(1, t / 90);
+      TST.msg = t < 8 ? 'Nastartováno, chvíli počkej…' : 'Měřím klidný chod za studena… (' + fmt(t, 0) + ' / 90 s)';
+      if (t >= 90) this.finish();
+    },
+    finish(){
+      const d = TST.d, okL = PROFILE.smooth[0], warnL = PROFILE.smooth[1], okC = okL * 2, warnC = warnL * 2;
+      const cyl = d.acc.map((a, i) => a && a.length >= 3 ? { c: i + 1, early: avg(a.filter(x => x.t <= 40).map(x => x.v)), late: avg(a.filter(x => x.t > 40).map(x => x.v)) } : null).filter(Boolean);
+      if (cyl.length < 2) { TST.st = 'ready'; TST.msg = 'Jednotka klidný chod nehlásí (skupina 013' + (S.cyl > 4 ? '/014' : '') + ').'; return; }
+      const warm = lastTest('smooth'), wc = warm && warm.num && warm.num.cyl ? warm.num.cyl : null;
+      cyl.forEach(x => { x.e = x.early != null ? x.early : x.late; x.w = wc && wc[x.c - 1] != null ? wc[x.c - 1] : null; });
+      const worst = cyl.reduce((a, b) => Math.abs(b.e) > Math.abs(a.e) ? b : a, cyl[0]);
+      const glowSusp = cyl.filter(x => Math.abs(x.e) > okC && (x.w == null || Math.abs(x.w) <= okL) && (x.late == null || Math.abs(x.late) < Math.abs(x.e)));
+      const alsoWarm = cyl.filter(x => Math.abs(x.e) > okC && x.w != null && Math.abs(x.w) > okL);
+      const v = Math.abs(worst.e) > warnC ? 'bad' : Math.abs(worst.e) > okC ? 'mid' : 'ok';
+      const list = a => a.map(x => x.c).join(', ');
+      const head = v === 'ok' ? 'Za studena běží všechny válce vyrovnaně – žhavení i vstřikovače jsou v pořádku.'
+        : alsoWarm.length ? 'Válec ' + list(alsoWarm) + ' zlobí za studena i za tepla – spíš vstřikovač nebo komprese než žhavicí svíčka.'
+        : (v === 'mid' ? 'Válec ' + list(glowSusp.length ? glowSusp : [worst]) + ' je za studena trochu mimo. Zatím nic vážného, může začínat slábnout žhavicí svíčka.' : 'Válec ' + list(glowSusp.length ? glowSusp : [worst]) + ' za studena výrazně zlobí – nejspíš žhavicí svíčka.');
+      let why = 'Žhavicí svíčky pomáhají jen za studena a chvíli po startu. Když jedna nefunguje, její válec po studeném startu hůř zapaluje, jednotka mu přidává palivo a v klidném chodu je výrazně mimo. Jak se motor zahřeje, rozdíl zmizí – proto se to za tepla nepozná. Válec, který je mimo i za tepla, ukazuje spíš na vstřikovač nebo kompresi.';
+      if (!wc) why += ' Pro přesnější výsledek udělej i test Klidný chod válců na teplém motoru – pak se porovná studený stav s teplým.';
+      if (S.cyl > 4) why += ' Válec 3 je u V6 referenční, proto se nehodnotí.';
+      if (d.cool0 != null && d.cool0 > 40) why += ' Pozor: motor nebyl úplně studený (' + fmt(d.cool0, 0) + ' °C), výsledek je jen orientační.';
+      const todo = v === 'ok' ? ['Nic, studený start je v pořádku.'] : alsoWarm.length
+        ? ['Prohoď vstřikovač z válce ' + list(alsoWarm) + ' s jiným válcem a udělej test Klidný chod znovu.', 'Když chyba půjde se vstřikovačem, je vadný on. Když zůstane na válci, nech změřit kompresi.']
+        : ['Změř žhavicí svíčku válce ' + list(glowSusp.length ? glowSusp : [worst]) + ' ohmmetrem: zdravá má zhruba 0,5–2 Ω, přerušená ukáže nekonečno.', 'Když jsou svíčky staré, měň je všechny najednou.', 'Když nežhaví žádná (kontrolka žhavení svítí krátce a motor startuje špatně u všech válců), zkontroluj relé žhavení.'];
+      TST.res = { v, why, head, todo,
+        rows: cyl.map(x => ['Válec ' + x.c, 'za studena ' + sgn(x.e, 2) + ' mg' + (x.late != null ? ' → po minutě ' + sgn(x.late, 2) : '') + (x.w != null ? ' · za tepla ' + sgn(x.w, 2) : '')])
+          .concat([['Voda při startu', d.cool0 != null ? fmt(d.cool0, 0) + ' °C' : '–'], ['Norma za studena', '±' + fmt(okC, 1) + ' mg']]),
+        sum: 'nejhorší válec ' + worst.c + ': ' + sgn(worst.e, 1) + ' mg' };
+      TST.res.num = { worst: Math.abs(worst.e), cyl: cyl.map(x => x.e) };
+      finishGrade(TST.res, cyl.map(x => ({ n: 'Válec ' + x.c + ' za studena', val: sgn(x.e, 2) + ' mg', norm: '±' + fmt(okC, 1) + ' mg', s: sc(Math.abs(x.e), [[0, 100], [okL, 90], [okC, 70], [warnC, 50], [warnC * 1.5, 20], [warnC * 2, 0]]), w: 1 })));
+      testDone('cold');
+    }
   },
 
   /* ---------- battery and charging ---------- */
@@ -714,7 +848,7 @@ const TESTS = [
 ];
 const TESTBY = {}; TESTS.forEach(t => TESTBY[t.id] = t);
 /* list order: on the spot first, then the ones that need a drive */
-const TEST_GROUPS = [['Na místě', ['pump', 'smooth', 'tim', 'batt', 'ctemp']], ['Za jízdy', ['turbo', 'maf', 'clutch', 'thermo', 'dyno', 'acc']]];
+const TEST_GROUPS = [['Na místě', ['pump', 'smooth', 'cold', 'tim', 'batt', 'ctemp']], ['Za jízdy', ['turbo', 'maf', 'wheels', 'clutch', 'thermo', 'dyno', 'acc']]];
 
 /* ---------- rendering ---------- */
 function testBlocked(t){

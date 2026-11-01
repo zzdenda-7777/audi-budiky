@@ -68,7 +68,7 @@ function renderStatus(){
   dot.className = 'dot ' + (R.on ? 'replay' : live ? 'live' : BUSY[S.state] ? 'busy' : '');
   let t = R.on ? 'Přehrávání záznamu' : S.stText, s;
   if (R.on) s = recTitle(R.name);
-  else if (live || S.state === 'faults' || S.state === 'cluster') { const r = readRate(); s = PROFILE.short + (r ? ' · ' + fmt(r, 1) + ' obnov/s' : ''); }
+  else if (live || S.state === 'faults' || S.state === 'cluster' || S.state === 'unit') { const r = readRate(); s = PROFILE.short + (r ? ' · ' + fmt(r, 1) + ' obnov/s' : ''); }
   else if (S.state === 'idle') s = LOG.length && /nenalezen|povolen|otevřít/.test(S.stText) ? 'Podrobnosti ve Více → Log chyb' : PROFILE.short + ' · zapoj kabel a zapni zapalování';
   else s = S.state === 'retry' ? 'Zkouším to znovu sám, nic nedělej' : 'Chvilku…';
   if ($('stT').textContent !== t) $('stT').textContent = t;
@@ -131,7 +131,7 @@ window.onStatus = s => {
   const prev = S.state;
   S.state = s.state || (s.ok ? 'live' : 'idle'); S.stText = s.text || '';
   if (S.state === 'live' && prev !== 'live') {
-    if (prev !== 'faults' && prev !== 'cluster') beep('conn', 'conn', 3000, S.everLive ? 'Spojení je zpátky' : PROFILE.say + ' připojena');
+    if (prev !== 'faults' && prev !== 'cluster' && prev !== 'unit') beep('conn', 'conn', 3000, S.everLive ? 'Spojení je zpátky' : PROFILE.say + ' připojena');
     S.everLive = true; S.liveSince = Date.now();
     if (CFG.autoRec && !REC.on && A && A.recStart) A.recStart();
   }
@@ -155,14 +155,18 @@ let cluSaveT = null;
 window.onGroup = d => {
   if (R.on) return; // live data is ignored while a recording is replayed
   const e = d.e || ENG, g = d.g, f = d.f || [];
-  if (d.na) { if (!S.unsup.has(g)) { S.unsup.add(g); pushPlan(); } return; }
-  if (S.unsup.has(g)) { S.unsup.delete(g); pushPlan(); }
+  /* "group not supported" is remembered for the engine only – another unit's missing group says nothing about the engine */
+  if (d.na) { if (e === ENG && !S.unsup.has(g)) { S.unsup.add(g); pushPlan(); } return; }
+  if (e === ENG && S.unsup.has(g)) { S.unsup.delete(g); pushPlan(); }
   S.groups[e + '-' + g] = { f, t: Date.now(), ms: d.ms };
   if (e === ENG) S.reads.push(clock());
   ingest(e, g, f);
   if (e === CLU) { clearTimeout(cluSaveT); cluSaveT = setTimeout(onCarCluster, 300); }
 };
 window.onFaults = d => onFaultsData(d);
+/* another unit (ABS…) was read on request: hand the result to whoever asked */
+window.onUnitIdent = o => { S.unitIdent = S.unitIdent || {}; if (o && o.a != null) S.unitIdent[o.a] = o.id || ''; };
+window.onUnitDone = o => { if (!o) return; UQ.lastErr = o.err || ''; unitDone('unit', o.a, !!o.ok); };
 window.onLog = o => onLogData(o);
 window.onRec = s => onRecState(s);
 window.onGps = d => {

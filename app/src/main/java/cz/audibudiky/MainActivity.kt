@@ -65,6 +65,10 @@ class MainActivity : Activity() {
     @Volatile private var clusterBaud = 0
     @Volatile private var engineBaud = 10400
     @Volatile private var faultsReq = 0
+    /** One-off read of another unit (e.g. ABS = 0x03): its address, groups and how long. */
+    private data class UnitReq(val address: Int, val groups: IntArray, val seconds: Int)
+    @Volatile private var unitReq: UnitReq? = null
+    private val unitBauds = HashMap<Int, Int>()
     @Volatile private var cableInfo = ""
     private var locationManager: LocationManager? = null
     /* Czech voice for announcements; plays like navigation (music is ducked, goes to the car radio over Bluetooth). */
@@ -290,6 +294,13 @@ class MainActivity : Activity() {
 
         @JavascriptInterface
         fun readFaults(unit: Int) { faultsReq = unit and 0x7F }
+
+        /** Reads measuring groups of another unit for a few seconds, then goes back to the engine. Read-only. */
+        @JavascriptInterface
+        fun readUnit(address: Int, groups: String, seconds: Int) {
+            val g = groups.split(",", " ", ";").mapNotNull { it.trim().toIntOrNull() }.filter { it in 1..255 }
+            if (g.isNotEmpty()) unitReq = UnitReq(address and 0x7F, g.toIntArray(), seconds.coerceIn(3, 120))
+        }
 
         @JavascriptInterface
         fun beep(kind: Int) {
@@ -744,6 +755,44 @@ class MainActivity : Activity() {
         error("cluster", "Přístrojový panel se nepodařilo přečíst: ${last?.message}")
     }
 
+    /** Same pattern as the panel: leave the engine, read the unit's groups for a while, say goodbye, go back. */
+    private fun readUnit(port: KLine, rx: LinkedBlockingDeque<Int>, req: UnitReq) {
+        val a = req.address
+        val name = when (a) { 0x03 -> "ABS"; 0x08 -> "klimatizaci"; 0x15 -> "airbag"; 0x02 -> "převodovku"; else -> "jednotku %02X".format(a) }
+        status("Čtu $name…", "unit")
+        val known = unitBauds[a]
+        val bauds = if (known != null) listOf(known) + listOf(9600, 10400).filter { it != known } else listOf(9600, 10400)
+        var last: Exception? = null
+        for (b in bauds) {
+            if (!running) return
+            val k = Kw1281(port, rx) { trace("[$name] $it") }
+            try {
+                val ident = k.connect(a, b)
+                unitBauds[a] = k.connectedBaud.takeIf { it != 0 } ?: b
+                js("onUnitIdent", JSONObject().put("a", a).put("id", ident.joinToString(" ")).toString())
+                val until = SystemClock.elapsedRealtime() + req.seconds * 1000L
+                while (running && SystemClock.elapsedRealtime() < until && unitReq == null) {
+                    for (g in req.groups) {
+                        val t0 = SystemClock.elapsedRealtime()
+                        val f = k.readGroup(g)
+                        if (f != null) recorder.write(a, g, f)
+                        emit(a, g, f, SystemClock.elapsedRealtime() - t0)
+                    }
+                }
+                k.end()
+                js("onUnitDone", JSONObject().put("a", a).put("ok", true).toString())
+                return
+            } catch (e: Exception) {
+                last = e
+                trace("[$name] $b Bd: ${e.message}")
+                if (e is NotKw1281) break
+                SystemClock.sleep(1500)
+            }
+        }
+        js("onUnitDone", JSONObject().put("a", a).put("ok", false).put("err", last?.message ?: "?").toString())
+        error("unit", "Jednotku $name se nepodařilo přečíst: ${last?.message}")
+    }
+
     private fun session(port: UsbSerialPort, conn: UsbDeviceConnection) {
         var io: SerialInputOutputManager? = null
         try { android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_URGENT_AUDIO) } catch (_: Exception) { }
@@ -765,6 +814,8 @@ class MainActivity : Activity() {
             var failures = 0
             while (running) {
                 if (faultsReq == 0x17) { faultsReq = 0; readCluster(line, rx, faults = true); continue }
+                val ur = unitReq
+                if (ur != null) { unitReq = null; readUnit(line, rx, ur); continue }
                 if (clusterNow || !clusterDone) { clusterNow = false; clusterDone = true; readCluster(line, rx, faults = false); continue }
 
                 val k = Kw1281(line, rx) { trace(it) }
@@ -782,7 +833,7 @@ class MainActivity : Activity() {
                     status("Živě", "live")
                     var i = 0
                     while (running) {
-                        if (clusterNow || faultsReq == 0x17) break
+                        if (clusterNow || faultsReq == 0x17 || unitReq != null) break
                         if (faultsReq != 0 && faultsReq == address) {
                             faultsReq = 0
                             status("Čtu chybové kódy…", "faults")

@@ -165,6 +165,7 @@ function ingest(e, g, f){
       if (oil != null) { S.cluHasOil = true; setM('oilT', oil, src); }
     }
   }
+  else if (typeof onUnitData === 'function') onUnitData(e, g, f);   // other units (ABS…), read on request by a test
   if (typeof healthIngest === 'function') healthIngest(e, g);
 }
 
