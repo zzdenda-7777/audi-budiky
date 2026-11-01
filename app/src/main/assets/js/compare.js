@@ -27,6 +27,7 @@ function healthScore(c){
   return parts.length ? { v: Math.round(avg(parts)), n: parts.length } : null;
 }
 const accBest = (c, m) => c.acc && c.acc[m] && c.acc[m].best != null ? c.acc[m].best : null;
+const tscore = (c, id) => c.tests && c.tests[id] && c.tests[id].score != null ? c.tests[id].score : null;
 const nz = v => (v == null || !isFinite(v)) ? null : v;
 
 /* rows: [group, label, unit, decimals, better, absolute(c, agg), normalised(c, agg) | null, test to measure] ; better: hi | lo | 14 | null */
@@ -39,6 +40,9 @@ const CMP_ROWS = [
   ['Motor', 'Vzduch ve 3000 ot.', 'mg', 0, 'hi', c => nz(tnum(c, 'maf') && tnum(c, 'maf').at3k), c => { const n = tnum(c, 'maf'); return n && n.at3k ? n.at3k / profOf(c).mafMin[0] * 100 : null; }, 'maf'],
   ['Motor', 'Klidný chod – nejhorší válec', 'mg', 2, 'lo', c => nz(tnum(c, 'smooth') && tnum(c, 'smooth').worst), c => { const n = tnum(c, 'smooth'); return n && n.worst != null ? n.worst / profOf(c).smooth[0] * 100 : null; }, 'smooth'],
   ['Motor', 'Předvstřik – odchylka', '°', 2, 'lo', c => nz(tnum(c, 'tim') && tnum(c, 'tim').mean), null, 'tim'],
+  ['Motor', 'Čerpadlo – body', '/100', 0, 'hi', c => tscore(c, 'pump'), null, 'pump'],
+  ['Motor', 'Čerpadlo – předvstřik pod zátěží', '°', 2, 'lo', c => nz(tnum(c, 'pump') && tnum(c, 'pump').loadDev), null, 'pump'],
+  ['Motor', 'Spojka – prokluz', '%', 1, 'lo', c => nz(tnum(c, 'clutch') && tnum(c, 'clutch').slip), null, 'clutch'],
   ['Motor', 'Výkon', 'kW', 0, 'hi', c => nz(tnum(c, 'dyno') && tnum(c, 'dyno').kw), c => { const n = tnum(c, 'dyno'); return n && n.kw ? n.kw / profOf(c).kw * 100 : null; }, 'dyno'],
   ['Motor', 'Moment', 'Nm', 0, 'hi', c => nz(tnum(c, 'dyno') && tnum(c, 'dyno').nm), c => { const n = tnum(c, 'dyno'); return n && n.nm ? n.nm / profOf(c).nm * 100 : null; }, 'dyno'],
   ['Motor', 'Výkon na kolech (GPS)', 'kW', 0, 'hi', c => nz(tnum(c, 'dyno') && tnum(c, 'dyno').wheel), c => { const n = tnum(c, 'dyno'); return n && n.wheel ? n.wheel / profOf(c).kw * 100 : null; }, 'dyno'],
@@ -50,10 +54,16 @@ const CMP_ROWS = [
   ['Spotřeba', 'Průměrná spotřeba', 'l/100', 1, 'lo', (c, a) => a.cons, null, null],
   ['Spotřeba', 'Cena na 100 km', 'Kč', 0, 'lo', (c, a) => a.cost100, null, null],
   ['Teploty', 'Zahřátí na 80 °C', 'min', 1, 'lo', (c, a) => a.warm != null ? a.warm / 60 : null, null, null],
+  ['Teploty', 'Termostat – body', '/100', 0, 'hi', c => tscore(c, 'thermo'), null, 'thermo'],
+  ['Teploty', 'Voda v rychlé jízdě (nejníž)', '°C', 0, 'hi', c => nz(tnum(c, 'thermo') && tnum(c, 'thermo').minFast), null, 'thermo'],
+  ['Teploty', 'Teploměr: motor proti budíku', '°C', 1, 'lo', c => { const n = tnum(c, 'ctemp'); return n && n.diff != null ? Math.abs(n.diff) : null; }, null, 'ctemp'],
   ['Teploty', 'Max voda', '°C', 0, 'lo', (c, a) => a.maxCool, null, null],
   ['Teploty', 'Max palivo', '°C', 0, 'lo', (c, a) => a.maxFuelT, null, null],
   ['Teploty', 'Max sání', '°C', 0, 'lo', (c, a) => a.maxIat, null, null],
   ['Elektro', 'Napětí za chodu', 'V', 1, '14', (c, a) => a.volt, null, null],
+  ['Elektro', 'Baterie – body', '/100', 0, 'hi', c => tscore(c, 'batt'), null, 'batt'],
+  ['Elektro', 'Baterie bez motoru', 'V', 2, 'hi', c => nz(tnum(c, 'batt') && tnum(c, 'batt').vOff), null, 'batt'],
+  ['Elektro', 'Nabíjení se spotřebiči', 'V', 2, 'hi', c => nz(tnum(c, 'batt') && tnum(c, 'batt').vLoad), null, 'batt'],
   ['Z jízd', 'Max turbo', 'bar', 2, 'hi', (c, a) => a.maxBoost, null, null],
   ['Z jízd', 'Max rychlost', 'km/h', 0, 'hi', (c, a) => a.maxSpd, null, null],
   ['Z jízd', 'Nejbohatší směs', ':1', 1, 'hi', (c, a) => a.minAfr, null, null],

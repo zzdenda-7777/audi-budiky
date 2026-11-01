@@ -70,6 +70,7 @@ function onFaultsData(d){
     beep('drive', 'info', 0, list.length ? 'V paměti ' + (list.length >= 2 && list.length <= 4 ? 'jsou ' : 'je ') + list.length + ' ' + czPl(list.length, 'chyba', 'chyby', 'chyb') : 'Paměť chyb je čistá');
   }
   if (curView === 'more' && moreSub === 'faults') renderFaults();
+  unitDone('faults', d.u, !d.err);
 }
 function faultBlock(name, r){
   if (!r) return '<p class="note">Zatím nenačteno.</p>';
@@ -87,13 +88,49 @@ function renderFaults(){
   $('fEng').onclick = () => readFaultsNow(ENG);
   $('fClu').onclick = () => readFaultsNow(CLU);
 }
-function readFaultsNow(unit){
-  if (!A || !A.readFaults || FLT.busy) return;
-  const key = unit === CLU ? 'clu' : 'eng';
-  FLT.busy = key; A.readFaults(unit);
+function readFaultsNow(unit, done){
+  if (!A || !A.readFaults) return;
+  unitJob('faults', unit, done);
   if (curView === 'more' && moreSub === 'faults') renderFaults();
-  setTimeout(() => { if (FLT.busy === key) { FLT.busy = null; FLT[key] = { t: Date.now(), err: unit === CLU ? 'panel neodpověděl včas' : 'jednotka neodpověděla včas' }; if (curView === 'more' && moreSub === 'faults') renderFaults(); } }, unit === CLU ? 25000 : 15000);
 }
+
+/* ---------- one job at a time, like a workshop tester ----------
+   Everything that needs the fault memory or another unit (instrument panel) goes through this queue.
+   Only one job runs; the others wait. The engine stream pauses for the job and then carries on,
+   so two requests never collide and units are never switched back and forth. */
+const UQ = { list: [], cur: null, t: 0 };
+const UQ_TIMEOUT = { faults: 18000, cluster: 30000 };
+function unitJob(kind, unit, done){
+  if (!A) return false;
+  const same = (UQ.cur && UQ.cur.kind === kind && UQ.cur.unit === unit) ? UQ.cur : UQ.list.find(j => j.kind === kind && j.unit === unit);
+  if (same) { if (done) same.cbs.push(done); return true; }
+  UQ.list.push({ kind, unit, cbs: done ? [done] : [] });
+  unitNext();
+  return true;
+}
+function unitNext(){
+  if (UQ.cur || !UQ.list.length || S.state !== 'live') return;
+  const j = UQ.cur = UQ.list.shift(); UQ.t = Date.now();
+  if (j.kind === 'faults') { FLT.busy = j.unit === CLU ? 'clu' : 'eng'; A.readFaults(j.unit); }
+  else if (j.kind === 'cluster') A.readClusterNow();
+}
+function unitDone(kind, unit, ok){
+  const j = UQ.cur; if (!j || j.kind !== kind || (unit != null && j.unit !== unit)) return;
+  UQ.cur = null;
+  j.cbs.forEach(cb => { try { cb(ok); } catch (_) {} });
+  setTimeout(unitNext, 400);
+}
+function unitWatch(){
+  const j = UQ.cur; if (!j || Date.now() - UQ.t < UQ_TIMEOUT[j.kind]) return;
+  if (j.kind === 'faults') {
+    const key = j.unit === CLU ? 'clu' : 'eng';
+    if (FLT.busy === key) FLT.busy = null;
+    FLT[key] = { t: Date.now(), err: j.unit === CLU ? 'panel neodpověděl včas' : 'jednotka neodpověděla včas' };
+    if (curView === 'more' && moreSub === 'faults') renderFaults();
+  }
+  unitDone(j.kind, j.unit, false);
+}
+function unitBusyText(){ const j = UQ.cur; return j ? (j.kind === 'cluster' ? 'Čtu přístrojový panel' : j.unit === CLU ? 'Čtu chyby panelu' : 'Čtu chyby motoru') + (UQ.list.length ? ' (další ' + UQ.list.length + ' čeká)' : '') : ''; }
 
 /* ---------- recordings ---------- */
 function onRecState(s){

@@ -14,8 +14,8 @@
     const c = car.t % 40;
     let rpm, speed, load;
     if (c < 6) { rpm = 820; speed = 0; load = 0; }
-    else if (c < 16) { const k = (c - 6) / 10; speed = 50 * k; rpm = 1200 + 1100 * ((k * 3) % 1); load = 0.45; }
-    else if (c < 19) { speed = 50; rpm = 1500; load = 0.2; }
+    else if (c < 16) { const k = (c - 6) / 10; speed = 46.5 * k; rpm = 1200 + 1100 * ((k * 3) % 1); load = 0.45; }
+    else if (c < 19) { speed = 46.5; rpm = 1500; load = 0.2; }
     else if (c < 26) { const k = (c - 19) / 7; rpm = 1500 + 2800 * k; speed = rpm / 1000 * 31; load = 1; }
     else if (c < 36) { speed = 80; rpm = 2100; load = 0.3; }
     else { const k = (c - 36) / 4; speed = 80 * (1 - k); rpm = 2100 - 1200 * k; load = 0; }
@@ -35,6 +35,7 @@
       case 2: return [F(1, c.rpm, 'ot/min'), F(23, c.iq * 2.2, '%'), F(16, null, '', '010'), F(5, c.cool, '°C')];
       case 3: return [F(1, c.rpm, 'ot/min'), F(39, c.mafS, 'mg/zdvih'), F(39, c.maf, 'mg/zdvih'), F(23, c.iq > 30 ? 0 : 38, '%')];
       case 4: return [F(1, c.rpm, 'ot/min'), F(3, 3.4, '°'), F(3, 3.4 + (Math.random() - 0.5) * 0.6, '°'), F(23, 52, '%')];
+      case 6: return [F(7, c.speed, 'km/h'), F(16, null, '', '000'), F(16, null, '', '000')];
       case 7: return [F(5, 38, '°C'), F(5, 0, '°C'), F(5, 24, '°C'), F(5, c.cool, '°C')];
       case 8: return [F(1, c.rpm, 'ot/min'), F(39, c.iq, 'mg/zdvih'), F(39, 52, 'mg/zdvih'), F(39, 48, 'mg/zdvih')];
       case 10: return [F(39, c.maf, 'mg/zdvih'), F(18, 1000, 'mbar'), F(18, c.act, 'mbar'), F(23, c.iq * 2.2, '%')];

@@ -136,6 +136,8 @@ window.onStatus = s => {
     if (CFG.autoRec && !REC.on && A && A.recStart) A.recStart();
   }
   if (prev === 'live' && S.state === 'retry') beep('conn', 'lost', 3000, 'Spojení s autem se ztratilo');
+  if (prev === 'cluster' && S.state !== 'cluster') unitDone('cluster', null, S.state === 'live');
+  if (S.state === 'live') setTimeout(unitNext, 300);
   if (S.state === 'idle' && prev !== 'idle') {
     if (REC.on && CFG.autoRec && A && A.recStop) A.recStop();
     saveTrip(); saveHist(true); FLT.busy = null;
@@ -188,7 +190,9 @@ setInterval(() => {
   const t = performance.now(), dt = Math.min(5, (t - lastTick) / 1000); lastTick = t; tickN++;
   sampleValues(); sample(); renderBanner(); shiftCheck(); tripTick(dt); engineTick(dt);
   if (curView === 'charts') drawCharts();
+  unitWatch();
   if (curView === 'tests' && TST.cur) updateTest();
+  else if (TST.cur && TST.cur.bg && (TST.st === 'wait' || TST.st === 'run')) testsBackground();
   if (curView === 'more' && moreSub === 'check' && tickN % 2 === 0 && !touching()) renderCheck();
   if (tickN % 4 === 0) {
     renderStatus();

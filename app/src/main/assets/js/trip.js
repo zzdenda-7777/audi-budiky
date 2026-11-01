@@ -185,7 +185,7 @@ function renderTripView(full){
   ]) + '<p class="note" style="margin:8px 0 0">Panel se čte jen při připojení – motor pak běží živě bez přerušení. „Načíst znovu“ motor přeruší asi na 5 s.</p></div>';
   $('tripBody').innerHTML = h;
   $('btnNewTrip').onclick = () => { endTrip(); renderTripView(true); showToast('Nová jízda začala'); };
-  $('btnClu').onclick = () => { if (A && A.readClusterNow) { A.readClusterNow(); showToast('Čtu panel…'); } };
+  $('btnClu').onclick = () => { if (A && A.readClusterNow) { unitJob('cluster', CLU); showToast('Čtu panel…'); } };
 }
 function renderHistory(){
   const cars = Object.values(HIST.cars).filter(c => c.id !== '_none' || (c.log && c.log.length)).sort((a, b) => (b.seen || 0) - (a.seen || 0));

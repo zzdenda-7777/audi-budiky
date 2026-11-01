@@ -126,6 +126,7 @@ function ingest(e, g, f){
   if (e === ENG) {
     const rpm = firstType(f, 1); if (rpm != null) setM('rpm', rpm, src);
     const volt = f.find(x => [6, 21].includes(x.t) && x.v > 8 && x.v < 17); if (volt) setM('volt', volt.v, src);
+    const kmh = firstType(f, 7); if (kmh != null && kmh >= 0 && kmh < 300) setM('spdEcu', kmh, src);   // vehicle speed (group 006 on TDI)
     if (g === 1) { setM('iq', at(f, 1), src); setM('cool', at(f, 3, [5]), src); }
     if (g === 2) { setM('ped', at(f, 1), src); setM('cool', at(f, 3, [5]), src); }
     if (g === 3) { setM('mafSpec', at(f, 1), src); setM('maf', at(f, 2), src); setM('egr', at(f, 3), src); }
