@@ -4,7 +4,7 @@
   if (window.Android) return;
   const LS = { get(k){ try { return localStorage.getItem('ab.' + k) || ''; } catch (_) { return ''; } }, set(k, v){ try { localStorage.setItem('ab.' + k, v); } catch (_) {} } };
   const call = (fn, arg) => setTimeout(() => { if (window[fn]) window[fn](arg); }, 0);
-  let plan = [11, 1, 11, 3], pi = 0, running = false, gTimer = null, gpsTimer = null, cluOn = true, cluNow = false, faultsReq = 0;
+  let plan = [11, 1, 11, 3], pi = 0, running = false, gTimer = null, cTimer = null, gpsTimer = null, cluOn = true, cluNow = false, faultsReq = 0;
   const car = { t: 0, cool: 46, speed: 0, rpm: 820, iq: 5, spec: 1000, act: 1000, maf: 280, mafS: 290 };
   function physics(dt){
     car.t += dt;
@@ -51,7 +51,7 @@
   }
   function loop(){
     if (!running) return;
-    if (cluNow) { cluNow = false; status('Čtu přístrojový panel…', 'cluster'); setTimeout(() => { cluster(); status('Živě', 'live'); gTimer = setTimeout(loop, 190); }, 1500); return; }
+    if (cluNow) { cluNow = false; status('Čtu přístrojový panel…', 'cluster'); gTimer = setTimeout(() => { if (!running) return; cluster(); status('Živě', 'live'); gTimer = setTimeout(loop, 190); }, 1500); return; }
     if (faultsReq) {
       const u = faultsReq; faultsReq = 0;
       setTimeout(() => call('onFaults', { u, f: u === 1 ? [{ c: 17964, s: 0xA3 }, { c: 553, s: 0x1B }] : [] }), 600);
@@ -78,14 +78,15 @@
     connect(){
       if (running) return; running = true;
       status('Připojuji motor…', 'connecting');
-      setTimeout(() => {
+      cTimer = setTimeout(() => {
+        if (!running) return;
         if (cluOn) cluster();
         call('onIdent', window.__demoV6 ? '8E0907401T  2,5l V6 TDI  G000AG  0004' : '038906018G  1,9l R4 EDC  G10SG  1608');
         status('Živě', 'live');
         loop();
       }, 900);
     },
-    disconnect(){ running = false; clearTimeout(gTimer); status('Odpojeno', 'idle'); },
+    disconnect(){ running = false; clearTimeout(gTimer); clearTimeout(cTimer); status('Odpojeno', 'idle'); },
     setPlan(s){ const p = String(s).split(',').map(Number).filter(n => n >= 0); if (p.length) { plan = p; pi = 0; } },
     setAddress(){}, setClusterOnConnect(b){ cluOn = !!b; }, setClusterPeriod(){},
     readClusterNow(){ cluNow = true; }, readFaults(u){ faultsReq = u === 0x17 ? 0x17 : 1; if (u === 0x17) setTimeout(() => call('onFaults', { u: 0x17, f: [] }), 2500); },
