@@ -421,15 +421,15 @@ class MainActivity : Activity() {
             val values = ContentValues().apply {
                 put(MediaStore.MediaColumns.DISPLAY_NAME, src.name)
                 put(MediaStore.MediaColumns.MIME_TYPE, mime)
-                put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/AudiBudiky")
+                put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/AudiDiag")
             }
             val uri = contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
                 ?: throw IOException("soubor nejde vytvořit")
             contentResolver.openOutputStream(uri)?.use { out -> src.inputStream().use { it.copyTo(out) } }
                 ?: throw IOException("soubor nejde otevřít")
-            "Stažené soubory/AudiBudiky/${src.name}"
+            "Stažené soubory/AudiDiag/${src.name}"
         } else {
-            val dir = File(getExternalFilesDir(null), "AudiBudiky")
+            val dir = File(getExternalFilesDir(null), "AudiDiag")
             dir.mkdirs()
             val dst = File(dir, src.name)
             src.copyTo(dst, overwrite = true)
@@ -571,7 +571,7 @@ class MainActivity : Activity() {
                     if (um.hasPermission(dev)) startConnect(auto = false)
                     else {
                         status("Přístup ke kabelu nebyl povolen", "idle")
-                        error("perm", "Přístup ke kabelu nebyl povolen. Při zapojení kabelu potvrď dotaz „Povolit Audi Budíky…“.")
+                        error("perm", "Přístup ke kabelu nebyl povolen. Při zapojení kabelu potvrď dotaz „Povolit Audi Diag…“.")
                     }
                 }
             }

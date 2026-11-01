@@ -167,9 +167,10 @@ const VINFO = {
 const vtext = x => typeof x === 'function' ? x() : (x || '');
 
 /* ---------- car picker shown before entering the app ---------- */
+function brandHtml(){ return '<div class="brand"><img src="img/icon.svg" alt=""><div><b>Audi Diag</b><span>živá data z motoru · jen čte</span></div></div>'; }
 function openPicker(){
   const g = $('picker');
-  g.innerHTML = '<h1>Které auto?</h1><p class="lead">Podle auta se nastaví hranice, co je v pořádku, a testy.</p>' +
+  g.innerHTML = brandHtml() + '<h1>Které auto?</h1><p class="lead">Podle auta se nastaví hranice, co je v pořádku, a testy.</p>' +
     Object.values(PROFILES).map(p => '<button class="pcard' + (p.id === PROFILE.id ? ' on' : '') + '" data-p="' + p.id + '"><b>' + esc(p.name) + '</b><span>' + esc(p.engine) + '</span>' +
       (p.id === PROFILE.id ? '<em>naposledy</em>' : '') + '</button>').join('') +
     '<p class="note" style="margin-top:6px">Auto přepneš kdykoli ve Více → Auto.</p>';

@@ -111,10 +111,10 @@
       setTimeout(() => { call('onLog', { k: 'engine-noanswer', m: 'Jednotka motoru neodpovídá. Zapnuté zapalování? Po výpadku spojení jednotka někdy až 20 s nereaguje.', ctx: ['17:20:05.000  → probouzím adresu 01 (5 Bd), linka 9600 Bd', '17:20:09.500  ← místo synchronizace: 00 00'] }); status('Motor neodpovídá – je zapnuté zapalování?', 'retry'); }, 3000);
       setTimeout(() => { if (!running) return; status('Živě', 'live'); loop(); }, 7000); },
     _unplug(){ running = false; clearTimeout(gTimer); status('Kabel odpojen', 'idle'); },
-    recStart(){ call('onRec', { on: true, name: 'jizda_ukazka.csv' }); }, recStop(){ call('onRec', { on: false, msg: '1234 řádků · Stažené soubory/AudiBudiky/jizda_ukazka.csv' }); },
+    recStart(){ call('onRec', { on: true, name: 'jizda_ukazka.csv' }); }, recStop(){ call('onRec', { on: false, msg: '1234 řádků · Stažené soubory/AudiDiag/jizda_ukazka.csv' }); },
     shareLastRec(){}, shareRec(){},
     listRecs(){ return JSON.stringify([{ n: 'jizda_2026-10-31_17-20-00.csv', kb: 42, t: Date.now() }]); },
     readRec(){ return csv(); },
-    saveText(){ return 'Uloženo do Stažené soubory/AudiBudiky (ukázka)'; }, shareText(){}
+    saveText(){ return 'Uloženo do Stažené soubory/AudiDiag (ukázka)'; }, shareText(){}
   };
 })();

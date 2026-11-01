@@ -105,7 +105,7 @@ function onRecState(s){
 function renderRecs(){
   const list = recList();
   $('moreBody').innerHTML = '<div class="card"><h3>Nahrávání ' + (REC.on ? '<span class="verdict bad">● nahrávám</span>' : '') + '</h3>' +
-    '<p>Ukládá všechny načtené hodnoty do CSV (otevřeš v Excelu). Po zastavení se zkopíruje do Stažené soubory / AudiBudiky.</p>' +
+    '<p>Ukládá všechny načtené hodnoty do CSV (otevřeš v Excelu). Po zastavení se zkopíruje do Stažené soubory / AudiDiag.</p>' +
     '<button class="btn wide ' + (REC.on ? '' : 'primary') + '" id="rBtn"' + (S.state === 'live' || REC.on ? '' : ' disabled') + '>' + (REC.on ? 'Zastavit záznam' : 'Spustit záznam') + '</button>' +
     (REC.msg ? '<p class="note" style="margin:8px 0 0">' + esc(REC.msg) + '</p>' : '') +
     '<div class="switch" style="margin-top:8px"><span class="sw-t">Nahrávat automaticky<small>spustí se po připojení, zastaví po odpojení</small></span><button class="tog' + (CFG.autoRec ? ' on' : '') + '" id="rAuto" aria-label="Nahrávat automaticky"></button></div></div>' +
@@ -238,7 +238,7 @@ function onLogData(o){
 }
 function logText(){
   let info = {}; try { info = JSON.parse(A && A.info ? A.info() : '{}'); } catch (_) {}
-  const hdr = ['Audi Budíky ' + (A && A.version ? A.version() : '?'), 'Telefon: ' + (info.phone || '?') + ', Android ' + (info.android || '?'), 'Kabel: ' + (info.cable || '?'),
+  const hdr = ['Audi Diag ' + (A && A.version ? A.version() : '?'), 'Telefon: ' + (info.phone || '?') + ', Android ' + (info.android || '?'), 'Kabel: ' + (info.cable || '?'),
     'Motor: ' + (S.ident || '?') + ' (' + (info.engineBaud || '?') + ' Bd)', 'Panel: ' + (S.cluIdent || '?') + ' (' + (info.clusterBaud || '?') + ' Bd)', 'Uloženo: ' + new Date().toLocaleString('cs-CZ'), ''];
   const body = LOG.slice().reverse().map(e => new Date(e.t0).toLocaleTimeString('cs-CZ') + '  ' + e.m + (e.n > 1 ? '  (' + e.n + '×, naposledy ' + new Date(e.t).toLocaleTimeString('cs-CZ') + ')' : '') + (e.ctx.length ? '\n    ' + e.ctx.join('\n    ') : '')).join('\n\n');
   return hdr.join('\n') + (body || 'Žádné chyby.');
@@ -256,7 +256,7 @@ function renderLog(){
 /* ---------- about ---------- */
 function renderAbout(){
   let info = {}; try { info = JSON.parse(A && A.info ? A.info() : '{}'); } catch (_) {}
-  $('moreBody').innerHTML = '<div class="card">' + kvRows([['Verze', esc(A && A.version ? A.version() : '?')], ['Telefon', esc(info.phone || '–')], ['Android', esc(info.android || '–')], ['Kabel', esc(info.cable || '–')],
+  $('moreBody').innerHTML = brandHtml() + '<div class="card">' + kvRows([['Verze', esc(A && A.version ? A.version() : '?')], ['Telefon', esc(info.phone || '–')], ['Android', esc(info.android || '–')], ['Kabel', esc(info.cable || '–')],
     ['Motor', (info.engineBaud || '–') + ' Bd'], ['Panel', (info.clusterBaud || '–') + ' Bd'], ['Válců', String(S.cyl)]]) +
     '<p class="note mono" style="margin:8px 0 0;word-break:break-word">' + esc(S.ident || 'motor zatím nepřipojen') + (S.cluIdent ? '<br>' + esc(S.cluIdent) : '') + '</p></div>' +
     '<button class="btn wide" id="aGuide" style="margin-top:10px">Ukázat průvodce prvním připojením</button>' +
@@ -289,7 +289,7 @@ function renderCheck(){
   // 2 permission
   if (!u.cable) steps.push(['', 'Přístup ke kabelu', 'Až bude kabel vidět.', '']);
   else if (u.perm) steps.push(['ok', 'Přístup ke kabelu', 'Povoleno.', '']);
-  else steps.push([S.state === 'wait' ? 'run' : 'bad', 'Přístup ke kabelu', 'Při zapojení kabelu potvrď dotaz „Povolit Audi Budíky přístup…“. Pak klepni na Připojit.', '']);
+  else steps.push([S.state === 'wait' ? 'run' : 'bad', 'Přístup ke kabelu', 'Při zapojení kabelu potvrď dotaz „Povolit Audi Diag přístup…“. Pak klepni na Připojit.', '']);
   // 3 engine
   if (live || S.state === 'faults') steps.push(['ok', 'Motor odpovídá', esc(S.ident || 'Spojeno.'), (info.engineBaud || '?') + ' Bd']);
   else if (busy) steps.push(['run', 'Motor odpovídá', esc(S.stText) + (lastKey === 'engine-noanswer' ? ' Je zapnuté zapalování?' : ''), '']);

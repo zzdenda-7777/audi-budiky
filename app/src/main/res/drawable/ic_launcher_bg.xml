@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Moro blue pearl (LZ5J) background -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <path android:pathData="M0,0 H108 V108 H0 Z">
+        <aapt:attr name="android:fillColor"><gradient android:type="radial" android:centerX="36" android:centerY="28" android:gradientRadius="96"><item android:offset="0" android:color="#3D5FAE"/><item android:offset="0.33" android:color="#1D3576"/><item android:offset="0.68" android:color="#0F1C45"/><item android:offset="1" android:color="#060B1F"/></gradient></aapt:attr>
+    </path>
+    <path android:pathData="M0,0 H108 V108 H0 Z">
+        <aapt:attr name="android:fillColor"><gradient android:type="radial" android:centerX="86" android:centerY="92" android:gradientRadius="60"><item android:offset="0" android:color="#4A5B3FA8"/><item android:offset="1" android:color="#005B3FA8"/></gradient></aapt:attr>
+    </path>
+    <path android:pathData="M0,0 H108 V108 H0 Z">
+        <aapt:attr name="android:fillColor"><gradient android:type="linear" android:startX="8" android:startY="0" android:endX="100" android:endY="108"><item android:offset="0" android:color="#00FFFFFF"/><item android:offset="0.4" android:color="#00FFFFFF"/><item android:offset="0.49" android:color="#24FFFFFF"/><item android:offset="0.56" android:color="#00FFFFFF"/><item android:offset="1" android:color="#00FFFFFF"/></gradient></aapt:attr>
+    </path>
+</vector>
