@@ -204,7 +204,7 @@ const SND_LIMS = {
 const SND_WHEN = {
   shift: 'Pod plynem, když otáčky dojdou na nastavenou hodnotu. Znovu až když klesnou o 400 ot.',
   turbo: 'Nedotlak: nad 2000 ot. je tlak o víc než 0,25 bar pod požadavkem. Přetlak: o víc než 0,15 bar nad. Málo vzduchu: nad 1800 ot. pod 85 % požadavku.',
-  temp: 'Když teplota přejde nastavenou hodnotu. Přehřívání nad 113 °C hlásí vždy.',
+  temp: 'Když teplota přejde nastavenou hodnotu. Přehřívání nad 115 °C hlásí vždy.',
   volt: 'Když motor běží a napětí je pod nastavenou hodnotou déle než 5 s.',
   smoke: 'Pod plynem, když je poměr vzduch/palivo pod 16:1 (kouří). Pod 14:1 hlásí velmi bohatou směs.',
   warm: 'Když se studený motor poprvé zahřeje na 80 °C. A když je voda pod 60 °C a točíš přes 2500 ot.',
@@ -282,14 +282,17 @@ function renderGroups(){
   if (!$('gTop')) {
     body.innerHTML = '<div class="card" id="gTop"><div class="seg" id="gSeg"><button data-g="auto">Podle obrazovky</button><button data-g="full">Všechny</button><button data-g="custom">Vlastní</button></div>' +
       '<div class="row" id="gCustomRow" style="margin-top:8px"><input id="gCustom" placeholder="např. 11,1,3,4" inputmode="numeric" style="flex:1"><button class="btn" id="gUse">Použít</button></div>' +
-      '<p class="note" id="gPlan" style="margin:8px 0 0"></p></div><div id="gList"></div>' +
+      '<p class="note" id="gPlan" style="margin:8px 0 0"></p></div>' +
+      '<div class="card"><div class="row" style="gap:10px;align-items:center"><button class="btn small" id="gScan">Projít skupiny 001–030</button><span class="note" id="gScanInfo" style="flex:1"></span></div></div><div id="gList"></div>' +
       '<p class="note" style="margin-top:12px">Názvy polí jsou podle běžného rozložení VAG TDI. Volba platí, jen dokud jsi na této stránce.</p>';
     $('gSeg').querySelectorAll('button').forEach(b => b.onclick = () => { groupsMode = b.dataset.g; pushPlan(); renderGroups(); });
     $('gCustom').value = groupsCustom;
     $('gUse').onclick = () => { groupsCustom = $('gCustom').value; groupsMode = 'custom'; pushPlan(); renderGroups(); };
+    $('gScan').onclick = () => { if (!scanStart(true)) showToast(S.state === 'live' ? 'Průzkum už běží' : 'Nejdřív se připoj k autu'); renderGroups(); };
   }
   $('gSeg').querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.g === groupsMode));
   $('gCustomRow').hidden = groupsMode !== 'custom';
+  const sc0 = scanStored(); $('gScanInfo').textContent = SCAN.on ? scanText() + '…' : sc0 ? 'Naposledy ' + dateTxt(sc0.t) + ': jednotka má ' + sc0.found + ' skupin.' : 'Ještě neproběhl. Proběhne sám při prvním připojení (asi 10 s).';
   $('gPlan').textContent = 'Čtu: ' + [...new Set(lastPlanStr.split(',').filter(Boolean).map(Number))].map(pad3).join(', ') + (S.unsup.size ? ' · jednotka nemá: ' + [...S.unsup].map(pad3).join(', ') : '');
   const ks = Object.keys(S.groups).sort((a, b) => { const [ea, ga] = a.split('-').map(Number), [eb, gb] = b.split('-').map(Number); return ea - eb || ga - gb; });
   $('gList').innerHTML = ks.map(k => {
@@ -297,6 +300,69 @@ function renderGroups(){
     return '<div class="gsec"><h4>' + (e === CLU ? 'Přístroje ' : 'Motor ') + pad3(g) + '<span>' + (age < 2 ? 'teď' : 'před ' + fmt(age, 0) + ' s') + (G.ms ? ' · ' + G.ms + ' ms' : '') + '</span></h4><table class="gtab">' +
       G.f.map((x, i) => '<tr><td>' + esc(fname(e, g, i, x)) + '</td><td class="v">' + (x.v != null ? fmt(x.v, Math.abs(x.v) < 10 ? 2 : Math.abs(x.v) < 100 ? 1 : 0) + ' <small>' + esc(x.u) + '</small>' : esc(x.s)) + '</td><td class="r">t' + x.t + ' ' + x.a + '/' + x.b + '</td></tr>').join('') + '</table></div>';
   }).join('') || '<div class="empty"><b>Zatím žádná data</b>Připoj se k autu.</div>';
+}
+
+/* ---------- one-time survey of the engine unit ----------
+   On the first connection to an engine unit (by its part number) every measuring group 001–030 is read once and stored:
+   which groups exist and which units their fields have. That is how the field layout is checked instead of guessed;
+   it goes into the report (Více → O aplikaci → Rozbor). */
+const SCAN = { on: false, list: [], got: {}, t0: 0, key: '', tried: {} };
+const scanKey = () => 'scan.' + String(S.ident || '').trim().split(/\s+/)[0].replace(/[^0-9A-Za-z]/g, '');
+const scanStored = () => S.ident ? KV.get(scanKey(), null) : null;
+function scanStart(manual){
+  if (SCAN.on || S.state !== 'live' || !S.ident) return false;
+  SCAN.on = true; SCAN.list = Array.from({ length: 30 }, (_, i) => i + 1); SCAN.got = {}; SCAN.t0 = Date.now(); SCAN.key = scanKey(); SCAN.manual = !!manual; SCAN.tried[SCAN.key] = true;
+  pushPlan(true); return true;
+}
+function scanData(e, g, d){
+  if (!SCAN.on || e !== ENG || !SCAN.list.includes(g) || SCAN.got[g]) return;
+  SCAN.got[g] = d.na ? 'na' : (d.f || []).map(x => ({ t: x.t, u: x.u || '', v: x.v, s: x.s || '' }));
+  if (SCAN.list.every(x => SCAN.got[x])) scanFinish(); else pushPlan(true);
+}
+function scanFinish(){
+  if (!SCAN.on) return;
+  const found = Object.keys(SCAN.got).filter(k => SCAN.got[k] !== 'na').length;
+  KV.set(SCAN.key, { t: Date.now(), ident: S.ident, groups: SCAN.got, found });
+  SCAN.on = false; pushPlan(true);
+  if (SCAN.manual) showToast('Průzkum hotový: ' + found + ' skupin');
+  if (curView === 'more' && moreSub === 'groups') renderGroups();
+}
+/* runs from the main tick: start once for a new engine unit when the car stands, stop on timeout */
+function scanTick(){
+  if (SCAN.on) { if (Date.now() - SCAN.t0 > 60000) scanFinish(); return; }
+  if (S.state !== 'live' || !S.ident || R.on || Date.now() - S.liveSince < 5000) return;
+  const k = scanKey(); if (SCAN.tried[k] || scanStored()) return;
+  if ((fresh('rpm', 3000) || 0) > 1200 || (TST.cur && (TST.st === 'run' || TST.st === 'wait')) || UQ.cur) return;
+  scanStart(false);
+}
+const scanText = () => SCAN.on ? 'Poznávám jednotku motoru (jen poprvé) ' + Object.keys(SCAN.got).length + '/' + SCAN.list.length : '';
+
+/* ---------- report: everything needed to check the app against the real car, in one text file ---------- */
+function buildReport(){
+  const L = [], c = HIST.cars[CAR || '_none'] || {};
+  let info = {}; try { info = JSON.parse(A && A.info ? A.info() : '{}'); } catch (_) {}
+  L.push('AUDI DIAG – ROZBOR', 'Vytvořeno: ' + new Date().toLocaleString('cs-CZ'), 'Verze: ' + (A && A.version ? A.version() : '?'), 'Telefon: ' + (info.phone || '?') + ', Android ' + (info.android || '?') + ', kabel ' + (info.cable || '?'),
+    'Auto (profil): ' + PROFILE.name + ' – ' + PROFILE.engine, 'Motor: ' + (S.ident || '–') + ' · ' + (info.engineBaud || '?') + ' Bd', 'Panel: ' + (S.cluIdent || '–'));
+  Object.keys(S.unitIdent || {}).forEach(a => L.push('Jednotka ' + a + ': ' + S.unitIdent[a]));
+  const sc0 = scanStored();
+  L.push('', '== PRŮZKUM SKUPIN ' + (sc0 ? '(' + new Date(sc0.t).toLocaleString('cs-CZ') + ', nalezeno ' + sc0.found + ')' : '(zatím neproběhl)') + ' ==');
+  if (sc0) Object.keys(sc0.groups).map(Number).sort((a, b) => a - b).forEach(g => { const f = sc0.groups[g];
+    L.push(pad3(g) + ': ' + (f === 'na' ? 'jednotka nemá' : f.map((x, i) => '[' + (i + 1) + '] t' + x.t + ' ' + (x.v != null ? fmt(x.v, 2) + ' ' + x.u : x.s)).join('  '))); });
+  L.push('', '== SKUPINY TEĎ ==');
+  Object.keys(S.groups).sort().forEach(k => { const [e, g] = k.split('-').map(Number), G = S.groups[k];
+    L.push((e === CLU ? 'P' : e === ENG ? 'M' : 'J' + e) + pad3(g) + ': ' + G.f.map((x, i) => fname(e, g, i, x) + '=' + (x.v != null ? fmt(x.v, 2) + ' ' + x.u : x.s) + ' (t' + x.t + ')').join(' | ')); });
+  L.push('', '== TESTY ==');
+  TESTS.forEach(t => { const r = c.tests && c.tests[t.id]; if (!r) return;
+    L.push(t.name + ' – ' + new Date(r.t).toLocaleString('cs-CZ') + ' – ' + (r.grade ? GRADES[r.grade][1] + ' ' + r.score + '/100' : (VERD[r.v] || VERD.none)[1]) + ' – ' + (r.sum || ''));
+    (r.rows || []).forEach(x => L.push('    ' + x[0] + ': ' + String(x[1]).replace(/<[^>]+>/g, ''))); });
+  L.push('', '== CHYBOVÉ KÓDY ==');
+  [['Motor', FLT.eng], ['Přístroje', FLT.clu]].forEach(([n, r]) => L.push(n + ': ' + (!r ? 'nenačteno' : r.err ? 'chyba čtení: ' + r.err : r.list.length ? r.list.map(f => String(f.c).padStart(5, '0') + ' ' + faultText(f.c) + ' /' + (f.s & 0x7F) + (f.s & 0x80 ? ' sporadická' : '')).join('; ') : 'žádné')));
+  L.push('', '== LOG CHYB ==');
+  if (!LOG.length) L.push('prázdný');
+  LOG.slice(0, 30).forEach(x => { L.push((x.n > 1 ? x.n + '× ' : '') + (x.m || '')); (x.ctx || []).slice(-6).forEach(cx => L.push('    ' + cx)); });
+  L.push('', '== POSLEDNÍ JÍZDY ==');
+  (HIST.trips || []).filter(t => t.car === CAR).slice(0, 5).forEach(t => L.push(new Date(t.start).toLocaleString('cs-CZ') + ': ' + fmt(t.km, 1) + ' km, ' + fmt(t.fuel, 2) + ' l, max voda ' + fmt(t.maxCool, 0) + ' °C, max palivo ' + fmt(t.maxFuelT, 0) + ' °C, napětí ' + fmt(t.voltAvg, 1) + ' V'));
+  return L.join('\n');
 }
 
 /* ---------- error log ---------- */
@@ -332,9 +398,13 @@ function renderAbout(){
   $('moreBody').innerHTML = brandHtml() + '<div class="card">' + kvRows([['Verze', esc(A && A.version ? A.version() : '?')], ['Telefon', esc(info.phone || '–')], ['Android', esc(info.android || '–')], ['Kabel', esc(info.cable || '–')],
     ['Motor', (info.engineBaud || '–') + ' Bd'], ['Panel', (info.clusterBaud || '–') + ' Bd'], ['Válců', String(S.cyl)]]) +
     '<p class="note mono" style="margin:8px 0 0;word-break:break-word">' + esc(S.ident || 'motor zatím nepřipojen') + (S.cluIdent ? '<br>' + esc(S.cluIdent) : '') + '</p></div>' +
+    '<div class="card"><h3>Rozbor pro kontrolu</h3><p class="note" style="margin:0 0 10px">Jeden textový soubor: identifikace jednotek, průzkum skupin, výsledky testů, chybové kódy a log. Po první jízdě ho pošli – podle něj se doladí hodnoty pro tvoje auto.</p>' +
+    '<div class="row" style="gap:8px"><button class="btn primary" id="aRepShare" style="flex:1">Poslat rozbor</button><button class="btn" id="aRepSave" style="flex:1">Uložit do telefonu</button></div></div>' +
     '<button class="btn wide" id="aGuide" style="margin-top:10px">Ukázat průvodce prvním připojením</button>' +
     '<p class="note" style="margin-top:12px">Aplikace z auta jen čte. Nic nezapisuje, nekóduje ani nemaže. Data zůstávají v telefonu, aplikace nemá přístup k internetu.</p>';
   $('aGuide').onclick = openGuide;
+  $('aRepShare').onclick = () => { try { if (A && A.shareText) A.shareText('rozbor', buildReport()); } catch (_) {} };
+  $('aRepSave').onclick = () => { try { showToast(A && A.saveText ? A.saveText('rozbor', buildReport()) : 'Nejde uložit'); } catch (_) {} };
 }
 
 /* ---------- car choice ---------- */
@@ -343,8 +413,8 @@ function renderCar(){
     Object.values(PROFILES).map(p => '<button class="pcard' + (p.id === PROFILE.id ? ' on' : '') + '" data-p="' + p.id + '"><b>' + esc(p.name) + '</b><span>' + esc(p.engine) + '</span>' + (p.id === PROFILE.id ? '<em>vybráno</em>' : '') + '</button>').join('') +
     '<div class="lbl2" style="margin-top:14px">Hranice pro ' + esc(PROFILE.short) + '</div>' +
     limitRows().map(g => '<div class="lbl2" style="margin:12px 2px 4px;color:var(--faint)">' + esc(g[0]) + '</div><div class="card" style="margin-top:0">' +
-      g[1].map(r => '<div class="limrow"><span>' + esc(r[0]) + '</span><b>' + esc(r[1]) + '</b></div>').join('') + '</div>').join('') +
-    '<p class="note" style="margin-top:10px">Hranice vychází z dílenské příručky VW a z praxe. Co je v pořádku, pozor a špatně, má u sebe každá hodnota (podrž prst na hodnotě). Po prvních jízdách je doladíme podle tvého auta.</p>';
+      g[1].map(r => '<div class="limrow"><span>' + esc(r[0]) + (r[2] ? ' <em class="src ok">✓ ' + esc(r[2]) + '</em>' : ' <em class="src">orientačně</em>') + '</span><b>' + esc(r[1]) + '</b></div>').join('') + '</div>').join('') +
+    '<p class="note" style="margin-top:10px">„✓ VW“ = hodnota z dílenské příručky VW, od Helly nebo výrobce. „Orientačně“ = odhad z praxe – VW pro tenhle motor číslo nezveřejňuje. Testy turba, vzduchu a čerpadla porovnávají hlavně s tím, co si žádá jednotka motoru, takže na odhadech nestojí. Co je v pořádku, pozor a špatně, má u sebe každá hodnota (podrž prst na hodnotě).</p>';
   $('moreBody').querySelectorAll('[data-p]').forEach(b => b.onclick = () => { setProfile(b.dataset.p); renderCar(); pushPlan(true); showToast(PROFILE.name); });
 }
 

@@ -141,8 +141,9 @@ const TESTS = [
       /* N75 duty at full boost = how much regulation reserve is left (more duty = vanes closed more = more boost) */
       const hiS = s.filter(p => p.duty != null && p.spec >= maxSpec * 0.85).map(p => p.duty).sort((a, b) => a - b);
       const dutyHi = hiS.length >= 3 ? hiS[Math.min(hiS.length - 1, Math.floor(hiS.length * 0.9))] : null;
-      if ((kind === 'under' || kind === 'never') && dutyHi != null) kind = dutyHi >= 88 ? 'leak' : dutyHi < 70 ? 'reg' : kind;
-      if (v === 'ok' && dutyHi != null && dutyHi >= 90) { v = 'mid'; kind = 'reserve'; why = 'Tlak drží, ale regulace už jede skoro naplno (N75 ' + fmt(dutyHi, 0) + ' %). Turbo má malou rezervu – začínající netěsnost sání nebo opotřebení.'; }
+      const n75Max = PROFILE.n75 ? PROFILE.n75[1] : 95;
+      if ((kind === 'under' || kind === 'never') && dutyHi != null) kind = dutyHi >= n75Max - 5 ? 'leak' : dutyHi < 70 ? 'reg' : kind;
+      if (v === 'ok' && dutyHi != null && dutyHi >= n75Max) { v = 'mid'; kind = 'reserve'; why = 'Tlak drží, ale regulace už jede skoro naplno (N75 ' + fmt(dutyHi, 0) + ' %). Turbo má malou rezervu – začínající netěsnost sání nebo opotřebení.'; }
       if (kind === 'leak') why += ' Ventil N75 přitom jede na ' + fmt(dutyHi, 0) + ' % – regulace dělá maximum, takže tlak někudy uniká nebo turbo nestačí.';
       if (kind === 'reg') why += ' Ventil N75 přitom jede jen na ' + fmt(dutyHi, 0) + ' % – turbo nedostává pořádný povel, problém je spíš v regulaci.';
       const und = worst != null ? Math.max(0, -worst) : null, ov = over != null ? Math.max(0, over) : null;
@@ -171,7 +172,7 @@ const TESTS = [
         { n: 'Největší propad pod požadavek', val: und != null ? '−' + fmt(und, 2) + ' bar' : '–', norm: 'do 0,20 bar', s: si < 0 ? 0 : sc(und, [[0, 100], [0.1, 88], [0.2, 70], [0.3, 50], [0.45, 20], [0.7, 0]]), w: 2 },
         { n: 'Přetlak nad požadavek', val: ov != null ? '+' + fmt(ov, 2) + ' bar' : '–', norm: 'do 0,15 bar', s: sc(ov, [[0, 100], [0.08, 90], [0.15, 70], [0.25, 50], [0.4, 10]]), w: 2 },
         { n: 'Nabuzení turba', val: spool != null ? fmt(spool, 1) + ' s' : 'nedosáhlo', norm: 'do 3 s', s: spool == null ? 0 : sc(spool, [[0.5, 100], [1.5, 88], [2.5, 76], [3, 70], [4, 50], [6, 15]]), w: 1 },
-        { n: 'Rezerva regulace (N75)', val: dutyHi != null ? fmt(dutyHi, 0) + ' % při plném tlaku' : 'nehlásí', norm: 'do 80 %', s: dutyHi != null ? sc(dutyHi, [[40, 100], [70, 92], [80, 70], [90, 50], [97, 15]]) : null, w: 1 }
+        { n: 'Rezerva regulace (N75)', val: dutyHi != null ? fmt(dutyHi, 0) + ' % při plném tlaku' : 'nehlásí', norm: (PROFILE.n75 ? PROFILE.n75[0] + '–' + PROFILE.n75[1] : '45–95') + ' %' + (PROFILE.src && PROFILE.src.n75 ? ' (VW)' : ''), s: dutyHi != null ? sc(dutyHi, [[40, 100], [75, 90], [88, 72], [n75Max, 50], [99, 20]]) : null, w: 1 }
       ]);
       testDone('turbo');
     },
@@ -261,9 +262,14 @@ const TESTS = [
     steps: () => ['Motor zahřátý (voda nad 80 °C), stůj na volnoběh.', 'Vypni klimatizaci, světla a ostatní spotřebiče.', 'Spusť test a 20 sekund se ničeho nedotýkej.'],
     live: () => [['Otáčky', fmt(fresh('rpm', 4000), 0), ''], ['Voda', fmt(fresh('cool', 15000), 0), '°C']],
     /* R4: group 013 = cylinders 1–4. V6 (VP44): 013 = cylinders 1, 2 (+3 = reference), 014 = cylinders 4, 5, 6. */
+    /* Layout per VW: 4 cylinders – four values = cylinders 1–4; three values = cylinders 1, 2, 4 measured against cylinder 3.
+       V6 – group 013 = cylinders 1 and 2, group 014 = cylinders 4, 5, 6, cylinder 3 is the reference (needle lift sender). */
     cyls(){
       const g13 = (S.smooth[13] ? S.smooth[13].vals : []).filter(x => x != null), g14 = (S.smooth[14] ? S.smooth[14].vals : []).filter(x => x != null);
-      if (S.cyl <= 4) return g13.slice(0, S.cyl).map((v, i) => ({ c: i + 1, v }));
+      if (S.cyl <= 4) {
+        if (g13.length === 3) return [{ c: 1, v: g13[0] }, { c: 2, v: g13[1] }, { c: 3, v: 0, ref: true }, { c: 4, v: g13[2] }];
+        return g13.slice(0, S.cyl).map((v, i) => ({ c: i + 1, v }));
+      }
       const a = g13.slice(0, 3).map((v, i) => ({ c: i + 1, v }));
       if (a.length === 2) a.push({ c: 3, v: 0, ref: true });
       g14.slice(0, 3).forEach((v, i) => a.push({ c: i + 4, v }));
@@ -285,7 +291,7 @@ const TESTS = [
       const badList = bad.map(p => p[0]).join(', ');
       if (worst > warnL) { v = 'bad'; why = 'Válec ' + badList + ' je mimo ±' + fmt(warnL, 1) + ' mg. Typicky vadný vstřikovač nebo slabší komprese na tom válci. VW radí prohodit vstřikovače: když chyba jde s vstřikovačem, je vadný on, když zůstane na válci, změř kompresi.'; }
       else if (worst > okL) { v = 'mid'; why = 'Válec ' + badList + ' je nad ±' + fmt(okL, 1) + ' mg (norma VW). Zatím ne vážné, sleduj to.'; }
-      if (S.cyl > 4) why += ' Válec 3 je u V6 referenční (má snímač zdvihu jehly), proto ukazuje 0.';
+      if (S.cyl > 4 || this.cyls().some(x => x.ref)) why += ' Válec 3 je referenční (má snímač zdvihu jehly), ostatní se měří proti němu, proto ukazuje 0.';
       const cool = fresh('cool', 15000); if (cool != null && cool < 75) why += ' Pozor: motor nebyl zahřátý, výsledek je jen orientační.';
       const head = v === 'ok' ? 'Všechny válce běží vyrovnaně, vstřikovače jsou v pořádku.' : v === 'mid' ? 'Válec ' + badList + ' se trochu liší od ostatních. Zatím nic vážného.' : 'Válec ' + badList + ' jde mimo normu – nejspíš vstřikovač nebo komprese.';
       const todo = v === 'ok' ? ['Nic, motor běží klidně.', 'Opakuj jednou za pár měsíců – uvidíš, jestli některý vstřikovač neslábne.']
@@ -293,7 +299,7 @@ const TESTS = [
         : ['Prohoď vstřikovač z válce ' + badList + ' s jiným válcem a změř znovu.', 'Když chyba půjde s vstřikovačem, je vadný on. Když zůstane na válci, nech změřit kompresi.'];
       TST.res = { v, why, head, todo, cyl: a.map(x => x == null ? 0 : x), rows: a.map((x, i) => ['Válec ' + (i + 1), x == null ? '–' : (x > 0 ? '+' : '') + fmt(x, 2) + ' mg']).concat([['Norma', '±' + fmt(okL, 1) + ' mg']]), sum: 'nejhorší ±' + fmt(worst, 2) + ' mg' };
       TST.res.num = { worst, lim: okL, cyl: a.map(x => x == null ? null : +x.toFixed(2)) };
-      const isRef = i => S.cyl > 4 && i === 2;
+      const refC = this.cyls().filter(x => x.ref).map(x => x.c - 1), isRef = i => refC.includes(i) || (S.cyl > 4 && i === 2);
       finishGrade(TST.res, a.map((x, i) => ({ n: 'Válec ' + (i + 1) + (isRef(i) ? ' (referenční)' : ''), val: x == null ? '–' : sgn(x, 2) + ' mg', norm: '±' + fmt(okL, 1) + ' mg',
         s: x == null || isRef(i) ? null : sc(Math.abs(x), [[0, 100], [okL * 0.4, 92], [okL, 70], [warnL, 50], [warnL * 1.5, 20], [warnL * 2, 0]]), w: 1 })));
       testDone('smooth');
@@ -379,7 +385,7 @@ const TESTS = [
       if (d.ph === 'idle') {
         const idleNow = rpm != null && rpm < 1100 && (iq == null || iq < 15), dt = clock() - d.tPrev; d.tPrev = clock();
         if (idleNow) d.idleMs += dt;
-        if (nw && spec != null && act != null && idleNow) d.idle.push({ dev: act - spec, iq, duty: fresh('timDuty', 2000) });
+        if (nw && spec != null && act != null && idleNow) { d.idle.push({ dev: act - spec, iq, duty: fresh('timDuty', 2000) }); const g = fresh('g149', 2500); if (g != null) (d.g149 = d.g149 || []).push(g); }
         TST.msg = idleNow ? 'Volnoběh: měřím 20 s, nic nepřidávej…' : 'Čekám na volnoběh – nepřidávej plyn…';
         d.prog = Math.min(1, d.idleMs / 20000);
         if (clock() - d.t0 > 150000 && d.prog < 1) { TST.st = 'ready'; TST.msg = d.idle.length ? 'Motor nebyl dost dlouho na volnoběhu. Zkus to znovu.' : 'Jednotka předvstřik nehlásí (skupina 004).'; return; }
@@ -406,7 +412,10 @@ const TESTS = [
       const ld = d.load.filter(p => p.rpm >= 1500 && p.rpm <= 4300), hasLoad = ld.length >= 4;
       const loadDev = hasLoad ? avg(ld.map(p => Math.abs(p.dev))) : null, loadMax = hasLoad ? Math.max(...ld.map(p => Math.abs(p.dev))) : null;
       const duties = d.idle.concat(ld).map(p => p.duty).filter(x => x != null);
-      const dutyEdge = ve && duties.length >= 5 ? duties.filter(x => x < 8 || x > 92).length / duties.length : null;
+      const nE = PROFILE.n108 || [2, 98], dutyEdge = ve && duties.length >= 5 ? duties.filter(x => x < nE[0] || x > nE[1]).length / duties.length : null;
+      /* VE pump extras from the VW workshop values: quantity adjuster G149 at idle, start of injection at full load ~3000 rpm */
+      const g149 = ve && d.g149 && d.g149.length >= 3 ? median(d.g149) : null, gR = PROFILE.g149;
+      const at3 = d.load.filter(p => p.rpm >= 2700 && p.rpm <= 3300), soi3 = ve && at3.length >= 2 ? Math.abs(median(at3.map(p => p.act))) : null, sR = PROFILE.soiFull;
       const iqMax = hasLoad && d.iqMax > 0 ? d.iqMax : null, iqF = PROFILE.iqFull[0];
       const fuelMax = pumpFuelT();
       const pf = FLT.eng && FLT.eng.list ? FLT.eng.list.filter(f => PUMP_CODES.includes(f.c)) : null;
@@ -417,6 +426,8 @@ const TESTS = [
       if (pfHard.length) bad.push('v paměti je chyba ' + pfHard.map(f => String(f.c).padStart(5, '0') + ' ' + faultText(f.c)).join(', '));
       else if (pf && pf.length) mid.push('v paměti je občasná chyba ' + pf.map(f => String(f.c).padStart(5, '0') + ' ' + faultText(f.c)).join(', '));
       if (dutyEdge != null) { if (dutyEdge > 0.3) bad.push('ventil předvstřiku N108 jede na doraz'); else if (dutyEdge > 0.1) mid.push('ventil předvstřiku N108 občas jede na doraz'); }
+      if (g149 != null && gR && (g149 < gR[0] || g149 > gR[1])) mid.push('regulátor dávky G149 na volnoběhu ukazuje ' + fmt(g149, 2) + ' V (VW ' + fmt(gR[0], 2) + '–' + fmt(gR[1], 2) + ' V)');
+      if (soi3 != null && sR && (soi3 < sR[0] - 0.5 || soi3 > sR[1] + 0.5)) mid.push('předvstřik na plný plyn ve 3000 ot. je ' + fmt(soi3, 1) + '° (VW ' + sR[0] + '–' + sR[1] + '°)');
       if (fuelMax != null && fuelMax > 80) mid.push('palivo mělo až ' + fmt(fuelMax, 0) + ' °C');
       if (iqMax != null && iqMax < iqF * 0.85) mid.push('na plný plyn jen ' + fmt(iqMax, 0) + ' mg paliva (norma aspoň ' + iqF + ' mg)');
       if (iqIdle != null && iqIdle > PROFILE.iqIdle[1] + 1) mid.push('na volnoběhu potřebuje víc paliva (' + fmt(iqIdle, 1) + ' mg)');
@@ -436,6 +447,7 @@ const TESTS = [
         rows: [['Předvstřik volnoběh (odchylka)', fmt(idleDev, 2) + '°'], ['Předvstřik pod zátěží (odchylka)', loadDev != null ? fmt(loadDev, 2) + '° (max ' + fmt(loadMax, 2) + '°)' : 'neměřeno'],
           ['Dávka volnoběh', iqIdle != null ? fmt(iqIdle, 1) + ' mg' : '–'], ['Dávka plný plyn', iqMax != null ? fmt(iqMax, 1) + ' mg' : 'neměřeno'],
           ['Max teplota paliva', fuelMax != null ? fmt(fuelMax, 0) + ' °C' : '–'], ['Chyby čerpadla', pf == null ? 'nenačteno' : pf.length ? pf.map(f => String(f.c).padStart(5, '0')).join(', ') : 'žádné'],
+          ['G149 volnoběh', g149 != null ? fmt(g149, 2) + ' V' : '–'], ['Předvstřik ve 3000 ot.', soi3 != null ? fmt(soi3, 1) + '°' : '–'],
           ['Měření', d.idle.length + ' + ' + ld.length + '×']],
         sum: 'volnoběh ' + fmt(idleDev, 1) + '°' + (loadDev != null ? ', zátěž ' + fmt(loadDev, 1) + '°' : ''),
         chart: hasLoad ? { a: sortX(ld.map(p => [p.rpm, p.spec])), b: sortX(ld.map(p => [p.rpm, p.act])), lo: Math.min(...ld.map(p => Math.min(p.spec, p.act))), hi: Math.max(...ld.map(p => Math.max(p.spec, p.act))) } : null };
@@ -449,7 +461,9 @@ const TESTS = [
         { n: 'Dávka paliva na volnoběhu', val: iqIdle != null ? fmt(iqIdle, 1) + ' mg' : '–', norm: PROFILE.iqIdle[0] + '–' + PROFILE.iqIdle[1] + ' mg', s: iqIdle != null ? sc(iqIdle, [[0, 40], [2, 90], [4, 100], [7, 90], [PROFILE.iqIdle[1], 70], [PROFILE.iqIdle[1] + 2, 50], [PROFILE.iqIdle[1] + 5, 20]]) : null, w: 1 },
         { n: 'Nejvyšší teplota paliva', val: fuelMax != null ? fmt(fuelMax, 0) + ' °C' : '–', norm: 'do 80 °C', s: fuelMax != null ? sc(fuelMax, [[40, 100], [65, 90], [80, 70], [90, 50], [100, 20]]) : null, w: 1 }
       ];
-      if (dutyEdge != null) m.push({ n: 'Ventil předvstřiku N108 na dorazu', val: fmt(dutyEdge * 100, 0) + ' % času', norm: 'skoro nikdy', s: sc(dutyEdge, [[0, 100], [0.1, 70], [0.3, 50], [0.6, 10]]), w: 1 });
+      if (dutyEdge != null) m.push({ n: 'Ventil předvstřiku N108 na dorazu', val: fmt(dutyEdge * 100, 0) + ' % času', norm: 'mimo ' + nE[0] + '–' + nE[1] + ' % skoro nikdy (VW)', s: sc(dutyEdge, [[0, 100], [0.1, 70], [0.3, 50], [0.6, 10]]), w: 1 });
+      if (g149 != null && gR) m.push({ n: 'Regulátor dávky G149 (volnoběh)', val: fmt(g149, 2) + ' V', norm: fmt(gR[0], 2) + '–' + fmt(gR[1], 2) + ' V (VW)', s: sc(g149, [[gR[0] - 0.3, 20], [gR[0] - 0.1, 50], [gR[0], 72], [(gR[0] + gR[1]) / 2, 100], [gR[1], 72], [gR[1] + 0.1, 50], [gR[1] + 0.3, 20]]), w: 1 });
+      if (soi3 != null && sR) m.push({ n: 'Předvstřik na plný plyn (3000 ot.)', val: fmt(soi3, 1) + '° před HÚ', norm: sR[0] + '–' + sR[1] + '° (VW)', s: sc(soi3, [[sR[0] - 3, 20], [sR[0] - 1, 50], [sR[0], 72], [(sR[0] + sR[1]) / 2, 100], [sR[1], 72], [sR[1] + 1, 50], [sR[1] + 3, 20]]), w: 1 });
       finishGrade(TST.res, m);
       testDone('pump');
     },
@@ -570,6 +584,57 @@ const TESTS = [
       TST.res.num = { worst: Math.abs(worst.e), cyl: cyl.map(x => x.e) };
       finishGrade(TST.res, cyl.map(x => ({ n: 'Válec ' + x.c + ' za studena', val: sgn(x.e, 2) + ' mg', norm: '±' + fmt(okC, 1) + ' mg', s: sc(Math.abs(x.e), [[0, 100], [okL, 90], [okC, 70], [warnC, 50], [warnC * 1.5, 20], [warnC * 2, 0]]), w: 1 })));
       testDone('cold');
+    }
+  },
+
+  /* ---------- EGR valve: at idle the engine unit steers fresh air (MAF) to its target with the EGR valve ----------
+     VW (AFN): air at idle 230–450 mg with EGR working, EGR duty 4–95 %. The unit switches EGR off after about 3 minutes
+     of idling, a short blip of throttle switches it on again. */
+  { id: 'egr', name: 'Ventil EGR', sayName: 'Ventil EGR', ds: 'Jestli na volnoběhu sedí vzduch na požadavek – zaseknutý nebo zanesený ventil EGR', need: () => [[3]],
+    steps: () => ['Motor zahřátý (voda nad 80 °C), stůj na volnoběhu, vypni klimatizaci a ventilátor topení.',
+      'Krátce přidej plyn asi na 2000 ot. a pusť. Po pár minutách volnoběhu jednotka EGR sama vypne, tímhle se znovu zapne.', 'Spusť test a 20 s nic nedělej.'],
+    live: () => [['Vzduch', fmt(fresh('maf'), 0), 'mg'], ['Požadováno', fmt(fresh('mafSpec'), 0), 'mg'], ['EGR', fmt(fresh('egr'), 0), '%']],
+    start(){ TST.d = { s: [], last: 0, t0: clock(), idleMs: 0, tPrev: clock() }; TST.st = 'run'; TST.msg = 'Měřím volnoběh 20 s…'; beep('timing', 'start', 0, 'Start'); },
+    tick(){
+      const d = TST.d, rpm = fresh('rpm', 3000), iq = fresh('iq', 3000), nw = isNew('maf', d.last); if (nw) d.last = M.maf.t;
+      const idle = rpm != null && rpm < 1100 && (iq == null || iq < 15), dt = clock() - d.tPrev; d.tPrev = clock();
+      if (idle) d.idleMs += dt;
+      const spec = fresh('mafSpec', 2000), act = fresh('maf', 2000);
+      if (nw && idle && spec != null && act != null && spec > 0) d.s.push({ spec, act, duty: fresh('egr', 2000) });
+      TST.msg = idle ? 'Měřím volnoběh… nic nepřidávej' : 'Čekám na volnoběh – nepřidávej plyn…';
+      d.prog = Math.min(1, d.idleMs / 20000);
+      if (d.prog >= 1) this.finish();
+      else if (clock() - d.t0 > 150000) { TST.st = 'ready'; TST.msg = d.s.length ? 'Motor nebyl dost dlouho na volnoběhu. Zkus to znovu.' : 'Jednotka vzduch nehlásí (skupina 003).'; }
+    },
+    finish(){
+      const d = TST.d, s = d.s, mi = PROFILE.mafIdle;
+      if (s.length < 5) { TST.st = 'ready'; TST.msg = 'Jednotka vzduch nehlásí (skupina 003).'; return; }
+      const spec = median(s.map(p => p.spec)), act = median(s.map(p => p.act)), dev = (act / spec - 1) * 100;
+      const du = s.map(p => p.duty).filter(x => x != null), duty = du.length ? median(du) : null;
+      if (duty != null && duty < 3 && act > (mi ? mi[1] + 50 : 500)) { TST.st = 'ready'; TST.msg = 'EGR je teď vypnuté (jednotka ho po pár minutách volnoběhu vypíná). Krátce přidej plyn a spusť test znovu.'; return; }
+      const bad = [], mid = []; let kind = 'ok';
+      if (Math.abs(dev) > 20) { bad.push('vzduch se od požadavku liší o ' + fmt(Math.abs(dev), 0) + ' %'); kind = dev > 0 ? 'closed' : 'open'; }
+      else if (Math.abs(dev) > 10) { mid.push('vzduch se od požadavku liší o ' + fmt(Math.abs(dev), 0) + ' %'); kind = dev > 0 ? 'closedMid' : 'openMid'; }
+      if (mi && (act < mi[0] || act > mi[1])) { mid.push('vzduchu na volnoběhu je ' + fmt(act, 0) + ' mg (VW ' + mi[0] + '–' + mi[1] + ' mg)'); if (kind === 'ok') kind = act < mi[0] ? 'openMid' : 'closedMid'; }
+      if (duty != null && (duty >= 95 || duty <= 4) && Math.abs(dev) > 5) mid.push('řízení EGR jede na doraz (' + fmt(duty, 0) + ' %)');
+      const v = bad.length ? 'bad' : mid.length ? 'mid' : 'ok';
+      const closed = kind === 'closed' || kind === 'closedMid';
+      const head = v === 'ok' ? 'Ventil EGR pracuje – vzduch na volnoběhu sedí na požadavek.'
+        : (v === 'mid' ? 'Skoro v pořádku, ale ' : closed ? 'Ventil EGR nejspíš neotvírá: ' : 'Ventil EGR nejspíš nezavírá nebo váha vzduchu měří málo: ') + bad.concat(mid).join('; ') + '.';
+      const why = 'Na volnoběhu jednotka řídí množství čerstvého vzduchu ventilem EGR: přimíchá tolik výfukových plynů, aby vzduch seděl na požadavek. ' +
+        'Když je vzduchu víc, než jednotka chce, ventil neotvírá (zaseknutý, prasklá podtlaková hadička, vadný ovládací ventil). Když je ho míň, ventil zůstává otevřený, nebo váha vzduchu měří málo.' +
+        (mi ? ' Podle VW má být na volnoběhu se zapnutým EGR ' + mi[0] + '–' + mi[1] + ' mg vzduchu.' : '');
+      const todo = v === 'ok' ? ['Nic, ventil EGR je v pořádku.']
+        : closed ? ['Zkontroluj podtlakovou hadičku k ventilu EGR a ovládací ventil (elektroventil) – prasklá hadička je nejčastější.', 'Na volnoběhu krátce přidej plyn a sleduj táhlo ventilu EGR, jestli se hýbe.', 'Zaseknutý ventil jde často vyčistit, jinak výměna.']
+        : ['Ventil EGR bývá zanesený karbonem a nedovře – vyčisti ho nebo vyměň.', 'Udělej test váhy vzduchu na plný plyn – slábnoucí váha vzduchu ukazuje málo i tady.', 'Zkontroluj sání mezi váhou vzduchu a turbem, jestli někde nepřisává.'];
+      TST.res = { v, why, head, todo, rows: [['Vzduch skutečně', fmt(act, 0) + ' mg'], ['Požadováno', fmt(spec, 0) + ' mg'], ['Rozdíl', sgn(dev, 0) + ' %'], ['Řízení EGR', duty != null ? fmt(duty, 0) + ' %' : '–'], ['Měření', s.length + '×']],
+        sum: fmt(act, 0) + ' / ' + fmt(spec, 0) + ' mg (' + sgn(dev, 0) + ' %)' };
+      TST.res.num = { dev, act, spec, duty };
+      const m = [{ n: 'Vzduch proti požadavku', val: sgn(dev, 0) + ' %', norm: 'do ±10 %', s: sc(Math.abs(dev), [[0, 100], [5, 90], [10, 70], [20, 50], [35, 15]]), w: 3 }];
+      if (mi) m.push({ n: 'Vzduch na volnoběhu', val: fmt(act, 0) + ' mg', norm: mi[0] + '–' + mi[1] + ' mg (VW)', s: sc(act, [[mi[0] - 100, 20], [mi[0], 70], [(mi[0] + mi[1]) / 2, 100], [mi[1], 70], [mi[1] + 100, 30]]), w: 1 });
+      if (duty != null) m.push({ n: 'Řízení ventilu EGR', val: fmt(duty, 0) + ' %', norm: '4–95 %' + (mi ? ' (VW)' : ''), s: duty <= 4 || duty >= 95 ? (Math.abs(dev) > 5 ? 45 : 75) : 100, w: 1 });
+      finishGrade(TST.res, m);
+      testDone('egr');
     }
   },
 
@@ -848,7 +913,7 @@ const TESTS = [
 ];
 const TESTBY = {}; TESTS.forEach(t => TESTBY[t.id] = t);
 /* list order: on the spot first, then the ones that need a drive */
-const TEST_GROUPS = [['Na místě', ['pump', 'smooth', 'cold', 'tim', 'batt', 'ctemp']], ['Za jízdy', ['turbo', 'maf', 'wheels', 'clutch', 'thermo', 'dyno', 'acc']]];
+const TEST_GROUPS = [['Na místě', ['pump', 'smooth', 'cold', 'egr', 'batt', 'ctemp']], ['Za jízdy', ['turbo', 'maf', 'wheels', 'clutch', 'thermo', 'dyno', 'acc']]];
 
 /* ---------- rendering ---------- */
 function testBlocked(t){

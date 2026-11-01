@@ -61,7 +61,7 @@ const KV = {
 const CFG_DEF = {
   sound: true, voice: true,
   snd: { shift: true, turbo: true, temp: true, volt: true, smoke: false, warm: true, cool: true, timing: true, conn: true, drive: true },
-  lim: { coolWarn: 108, oilWarn: 135, fuelTWarn: 80, voltLow: 12.8, fuelLow: 10 },
+  lim: { coolWarn: 110, oilWarn: 135, fuelTWarn: 85, voltLow: 12.8, fuelLow: 10 },
   shiftRpm: 4000, mass: 1450, price: 36.5,
   cluster: true, gps: true, autoRec: false,
   span: 60, accMode: '0-100', page: 0, theme: 'moro', nightAuto: true, nightDim: true, lastPos: null, onboarded: false, profile: 'a4v6', massBy: {}
@@ -127,7 +127,11 @@ function ingest(e, g, f){
     const rpm = firstType(f, 1); if (rpm != null) setM('rpm', rpm, src);
     const volt = f.find(x => [6, 21].includes(x.t) && x.v > 8 && x.v < 17); if (volt) setM('volt', volt.v, src);
     const kmh = firstType(f, 7); if (kmh != null && kmh >= 0 && kmh < 300) setM('spdEcu', kmh, src);   // vehicle speed (group 006 on TDI)
-    if (g === 1) { setM('iq', at(f, 1), src); setM('cool', at(f, 3, [5]), src); }
+    if (g === 1) {
+      setM('iq', at(f, 1), src); setM('cool', at(f, 3, [5]), src);
+      /* VE pump (1.9): field 3 = modulating piston sender G149 (quantity adjuster position), about 1.5–1.9 V at idle */
+      const g149 = f[2]; if (g149 && g149.v != null && (/V/.test(g149.u || '') || g149.t === 6) && g149.v > 0.2 && g149.v < 5) setM('g149', g149.v, src);
+    }
     if (g === 2) { setM('ped', at(f, 1), src); setM('cool', at(f, 3, [5]), src); }
     if (g === 3) { setM('mafSpec', at(f, 1), src); setM('maf', at(f, 2), src); setM('egr', at(f, 3), src); }
     if (g === 4) { setM('timSpec', at(f, 1), src); setM('tim', at(f, 2), src); setM('timDuty', at(f, 3), src); }
@@ -208,8 +212,8 @@ const VAL = [
     sub:() => (fresh('limRpm') == null ? '' : 'limit ' + fmt(fresh('limRpm'), 1) + ' / ' + fmt(fresh('limMaf'), 1)), range:[0, 60], step:10 },
   { id:'ped', name:'Plyn', unit:'%', d:0, cat:'motor', need:[[10, 2]], get:() => fresh('ped'), range:[0, 100], step:25 },
   { id:'cool', name:'Voda', unit:'°C', d:0, cat:'temp', need:[[1, 7, 2, 12]], get:() => fresh('cool', 10000), range:[40, 130], step:30, red:110,
-    warn:v => v > 105, bad:v => v > 112 },
-  { id:'fuelT', name:'Palivo', unit:'°C', d:0, cat:'temp', need:[[7]], get:() => fresh('fuelT', 10000), range:[0, 100], step:25, warn:v => v > 75, bad:v => v > 85 },
+    warn:v => v > 110, bad:v => v > 115 },
+  { id:'fuelT', name:'Palivo', unit:'°C', d:0, cat:'temp', need:[[7]], get:() => fresh('fuelT', 10000), range:[0, 100], step:25, warn:v => v > 80, bad:v => v > 90 },
   { id:'iat', name:'Sání', unit:'°C', d:0, cat:'temp', need:[[7]], get:() => fresh('iat', 10000), range:[-20, 80], step:20, warn:v => v > 60 },
   { id:'outT', name:'Venku', unit:'°C', d:0, cat:'temp', need:[], clu:true, get:() => any('outT'),
     sub:() => (any('outT') != null && any('outT') <= 3) ? 'pozor, náledí' : (S.cluRead ? 'z panelu' : 'načte se z panelu'), range:[-20, 40], step:10, warn:v => v <= 3 },
@@ -310,7 +314,7 @@ const sayFix = s => { s = String(s || '').trim(); return /[.!?]$/.test(s) ? s : 
 const ALERTS = [
   { id:'over', say:() => 'Pozor, přetlak turba', lvl:'bad', snd:'turbo', txt:'Přetlak turba', hold:1000, test:() => { const b = boostRel(), s = boostSpecRel(); return b != null && s != null && b > 0.3 && s > 0.5 && b - s > 0.15; }, info:() => '+' + fmt(boostRel() - boostSpecRel(), 2) + ' bar' },
   { id:'under', say:() => 'Turbo nedotahuje tlak', lvl:'warn', snd:'turbo', txt:'Nedotlak turba', hold:1500, test:() => { const b = boostRel(), s = boostSpecRel(), rpm = fresh('rpm', 3000) || 0; return b != null && s != null && rpm > 2000 && s > 0.5 && s - b > 0.25; }, info:() => fmt(boostRel() - boostSpecRel(), 2) + ' bar' },
-  { id:'cool2', say:() => 'Motor se přehřívá, voda má ' + deg(any('cool')), lvl:'bad', snd:'temp', txt:'Přehřívání motoru', hold:1000, test:() => (fresh('cool', 10000) || 0) > 113, info:() => fmt(any('cool'), 0) + ' °C' },
+  { id:'cool2', say:() => 'Motor se přehřívá, voda má ' + deg(any('cool')), lvl:'bad', snd:'temp', txt:'Přehřívání motoru', hold:1000, test:() => (fresh('cool', 10000) || 0) > 115, info:() => fmt(any('cool'), 0) + ' °C' },
   { id:'cool', say:() => 'Voda je moc horká, ' + deg(any('cool')), lvl:'warn', snd:'temp', txt:'Vysoká teplota vody', hold:2000, test:() => (fresh('cool', 10000) || 0) > CFG.lim.coolWarn, info:() => fmt(any('cool'), 0) + ' °C' },
   { id:'oil', say:() => 'Olej je moc horký, ' + deg(any('oilT')), lvl:'bad', snd:'temp', txt:'Vysoká teplota oleje', hold:1000, test:() => (any('oilT') || 0) > CFG.lim.oilWarn, info:() => fmt(any('oilT'), 0) + ' °C' },
   { id:'fuel', say:() => 'Palivo je horké, ' + deg(any('fuelT')), lvl:'warn', snd:'temp', txt:'Horké palivo', hold:3000, test:() => (fresh('fuelT', 10000) || 0) > CFG.lim.fuelTWarn, info:() => fmt(any('fuelT'), 0) + ' °C' },

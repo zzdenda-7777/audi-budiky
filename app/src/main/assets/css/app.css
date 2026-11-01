@@ -377,6 +377,8 @@ details.raw{margin-top:12px} details.raw summary{color:var(--muted);font-size:13
 .infnow b{font-family:var(--cond);font-size:19px}
 .inftx{margin:0;font-size:14.5px;line-height:1.5;color:var(--text)}
 
+.limrow em.src{font-style:normal;font-size:10.5px;font-family:var(--mono);color:var(--faint);margin-left:4px;white-space:nowrap}
+.limrow em.src.ok{color:var(--ok)}
 /* ---------- voice picker ---------- */
 .vlist{display:flex;flex-direction:column;gap:6px}
 .vopt{display:block;width:100%;text-align:left;background:var(--panel2);border:1px solid var(--line);border-radius:12px;padding:10px 12px;color:var(--text)}

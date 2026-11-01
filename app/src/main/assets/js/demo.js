@@ -34,14 +34,15 @@
       case 1: return [F(1, c.rpm, 'ot/min'), F(39, c.iq, 'mg/zdvih'), F(6, 1.52, 'V'), F(5, c.cool, '°C')];
       case 2: return [F(1, c.rpm, 'ot/min'), F(23, c.iq * 2.2, '%'), F(16, null, '', '010'), F(5, c.cool, '°C')];
       case 3: return [F(1, c.rpm, 'ot/min'), F(39, c.mafS, 'mg/zdvih'), F(39, c.maf, 'mg/zdvih'), F(23, c.iq > 30 ? 0 : 38, '%')];
-      case 4: return [F(1, c.rpm, 'ot/min'), F(3, 3.4, '°'), F(3, 3.4 + (Math.random() - 0.5) * 0.6, '°'), F(23, 52, '%')];
+      case 4: { const full = c.iq > 30, sp = full ? 8 + Math.max(0, c.rpm - 2000) / 1000 * 2 : 3.4;   // VW AFN: idle 3° ATDC–4° BTDC, full load 6–14°
+        return [F(1, c.rpm, 'ot/min'), F(3, sp, '°'), F(3, sp + (Math.random() - 0.5) * 0.6, '°'), F(23, full ? 78 : 52, '%')]; }
       case 6: return [F(7, c.speed, 'km/h'), F(16, null, '', '000'), F(16, null, '', '000')];
       case 7: return [F(5, 38, '°C'), F(5, 0, '°C'), F(5, 24, '°C'), F(5, c.cool, '°C')];
       case 8: return [F(1, c.rpm, 'ot/min'), F(39, c.iq, 'mg/zdvih'), F(39, 52, 'mg/zdvih'), F(39, 48, 'mg/zdvih')];
       case 10: return [F(39, c.maf, 'mg/zdvih'), F(18, 1000, 'mbar'), F(18, c.act, 'mbar'), F(23, c.iq * 2.2, '%')];
       case 11: return [F(1, c.rpm, 'ot/min'), F(18, c.spec, 'mbar'), F(18, c.act, 'mbar'), F(23, 40 + (c.spec - 1000) / 30, '%')];
       case 12: return [F(10, null, '', 'teplý'), F(0, null, '', ''), F(6, 14.1, 'V'), F(5, c.cool, '°C')];
-      case 13: return window.__demoV6 ? [F(39, 0.6, 'mg/zdvih'), F(39, -1.2, 'mg/zdvih'), F(1, c.rpm, 'ot/min')] : [F(39, 0.8, 'mg/zdvih'), F(39, -1.4, 'mg/zdvih'), F(39, 2.4, 'mg/zdvih'), F(39, -0.6, 'mg/zdvih')];
+      case 13: return window.__demoV6 ? [F(39, 0.6, 'mg/zdvih'), F(39, -1.2, 'mg/zdvih'), F(1, c.rpm, 'ot/min')] : [F(39, 0.8, 'mg/zdvih'), F(39, -1.4, 'mg/zdvih'), F(39, 2.4, 'mg/zdvih')];   // AFN per VW: cyl 1, 2, 4 against cyl 3
       case 14: return window.__demoV6 ? [F(39, 1.7, 'mg/zdvih'), F(39, -0.4, 'mg/zdvih'), F(39, 0.3, 'mg/zdvih'), F(1, c.rpm, 'ot/min')] : null;
       default: return null;
     }

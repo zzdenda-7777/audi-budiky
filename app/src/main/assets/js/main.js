@@ -37,6 +37,7 @@ function v2root(v){
 
 /* Which groups to read right now – only what is on screen. */
 function currentPlan(){
+  if (SCAN.on) { const rest = SCAN.list.filter(g => !SCAN.got[g]); if (rest.length) return rest; }
   if (curView === 'more' && moreSub === 'groups') { const p = groupsPlan(); if (p) return p; }
   if (curView === 'tests' && TST.cur) { const req = TST.cur.need(); if (req.length) return buildPlan(groupsFor([], req)); }
   if (D.focus) return buildPlan(groupsFor([D.focus.id]));
@@ -68,7 +69,7 @@ function renderStatus(){
   dot.className = 'dot ' + (R.on ? 'replay' : live ? 'live' : BUSY[S.state] ? 'busy' : '');
   let t = R.on ? 'Přehrávání záznamu' : S.stText, s;
   if (R.on) s = recTitle(R.name);
-  else if (live || S.state === 'faults' || S.state === 'cluster' || S.state === 'unit') { const r = readRate(); s = PROFILE.short + (r ? ' · ' + fmt(r, 1) + ' obnov/s' : ''); }
+  else if (live || S.state === 'faults' || S.state === 'cluster' || S.state === 'unit') { const r = readRate(); s = SCAN.on ? scanText() : PROFILE.short + (r ? ' · ' + fmt(r, 1) + ' obnov/s' : ''); }
   else if (S.state === 'idle') s = LOG.length && /nenalezen|povolen|otevřít/.test(S.stText) ? 'Podrobnosti ve Více → Log chyb' : PROFILE.short + ' · zapoj kabel a zapni zapalování';
   else s = S.state === 'retry' ? 'Zkouším to znovu sám, nic nedělej' : 'Chvilku…';
   if ($('stT').textContent !== t) $('stT').textContent = t;
@@ -155,6 +156,7 @@ let cluSaveT = null;
 window.onGroup = d => {
   if (R.on) return; // live data is ignored while a recording is replayed
   const e = d.e || ENG, g = d.g, f = d.f || [];
+  scanData(e, g, d);
   /* "group not supported" is remembered for the engine only – another unit's missing group says nothing about the engine */
   if (d.na) { if (e === ENG && !S.unsup.has(g)) { S.unsup.add(g); pushPlan(); } return; }
   if (e === ENG && S.unsup.has(g)) { S.unsup.delete(g); pushPlan(); }
@@ -194,7 +196,7 @@ setInterval(() => {
   const t = performance.now(), dt = Math.min(5, (t - lastTick) / 1000); lastTick = t; tickN++;
   sampleValues(); sample(); renderBanner(); shiftCheck(); tripTick(dt); engineTick(dt);
   if (curView === 'charts') drawCharts();
-  unitWatch();
+  unitWatch(); scanTick();
   if (curView === 'tests' && TST.cur) updateTest();
   else if (TST.cur && TST.cur.bg && (TST.st === 'wait' || TST.st === 'run')) testsBackground();
   if (curView === 'more' && moreSub === 'check' && tickN % 2 === 0 && !touching()) renderCheck();
