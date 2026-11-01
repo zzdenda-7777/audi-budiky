@@ -24,7 +24,10 @@ import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
 import android.provider.MediaStore
+import android.net.Uri
 import android.speech.tts.TextToSpeech
+import android.speech.tts.UtteranceProgressListener
+import android.speech.tts.Voice
 import android.view.WindowManager
 import android.webkit.JavascriptInterface
 import android.webkit.WebView
@@ -68,6 +71,8 @@ class MainActivity : Activity() {
     private var tts: TextToSpeech? = null
     @Volatile private var ttsState = 0 // 0 starting, 1 ok, 2 Czech missing, 3 error
     private var ttsN = 0
+    private var ttsEnginePkg: String? = null
+    private val ttsTexts = java.util.concurrent.ConcurrentHashMap<String, String>()
 
     private val tone: ToneGenerator? by lazy {
         try { ToneGenerator(AudioManager.STREAM_MUSIC, 90) } catch (e: Exception) { null }
@@ -129,20 +134,7 @@ class MainActivity : Activity() {
         super.onCreate(savedInstanceState)
         try { engineBaud = getSharedPreferences("ab", 0).getInt("engineBaud", 10400) } catch (_: Exception) { }
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        try {
-            tts = TextToSpeech(this) { st ->
-                if (st == TextToSpeech.SUCCESS) {
-                    val t = tts
-                    val r = t?.setLanguage(Locale("cs", "CZ")) ?: TextToSpeech.LANG_NOT_SUPPORTED
-                    ttsState = if (r >= TextToSpeech.LANG_AVAILABLE) 1 else 2
-                    try {
-                        t?.setAudioAttributes(AudioAttributes.Builder()
-                            .setUsage(AudioAttributes.USAGE_ASSISTANCE_NAVIGATION_GUIDANCE)
-                            .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build())
-                    } catch (_: Exception) { }
-                } else ttsState = 3
-            }
-        } catch (e: Exception) { ttsState = 3 }
+        startTts()
         recorder = Recorder(logDir)
         web = WebView(this)
         web.settings.javaScriptEnabled = true
@@ -166,6 +158,76 @@ class MainActivity : Activity() {
         }
         if (Build.VERSION.SDK_INT >= 33) registerReceiver(usbReceiver, f, Context.RECEIVER_EXPORTED)
         else registerReceiver(usbReceiver, f)
+    }
+
+    /* ---------- voice ----------
+       Google's engine has the best Czech voices, so it is used when installed (otherwise the phone default).
+       The voice, speed and pitch the user picked are kept in prefs and applied as soon as the engine is ready. */
+    private fun startTts() {
+        ttsEnginePkg = try { packageManager.getPackageInfo("com.google.android.tts", 0); "com.google.android.tts" } catch (_: Exception) { null }
+        try {
+            tts = TextToSpeech(this, { st ->
+                if (st == TextToSpeech.SUCCESS) {
+                    val t = tts
+                    val r = t?.setLanguage(Locale("cs", "CZ")) ?: TextToSpeech.LANG_NOT_SUPPORTED
+                    ttsState = if (r >= TextToSpeech.LANG_AVAILABLE) 1 else 2
+                    try {
+                        t?.setAudioAttributes(AudioAttributes.Builder()
+                            .setUsage(AudioAttributes.USAGE_ASSISTANCE_NAVIGATION_GUIDANCE)
+                            .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build())
+                    } catch (_: Exception) { }
+                    try { t?.setOnUtteranceProgressListener(ttsListener) } catch (_: Exception) { }
+                    applyTtsPrefs()
+                } else ttsState = 3
+            }, ttsEnginePkg)
+        } catch (e: Exception) { ttsState = 3 }
+    }
+
+    private val ttsPrefs get() = getSharedPreferences("tts", 0)
+
+    private fun csVoices(): List<Voice> = try {
+        (tts?.voices ?: emptySet()).filter { v ->
+            val l = v.locale.language.lowercase(Locale.ROOT)
+            (l == "cs" || l == "ces" || l == "cze") && !v.features.contains(TextToSpeech.Engine.KEY_FEATURE_NOT_INSTALLED)
+        }
+    } catch (_: Exception) { emptyList() }
+
+    /** Best voice that works without internet: highest quality first. */
+    private fun bestLocalVoice(): Voice? = csVoices().filter { !it.isNetworkConnectionRequired }
+        .sortedWith(compareByDescending<Voice> { it.quality }.thenBy { it.latency }).firstOrNull()
+
+    private fun applyTtsPrefs() {
+        val t = tts ?: return
+        if (ttsState != 1) return
+        val p = ttsPrefs
+        try { t.setSpeechRate(p.getFloat("rate", 1.05f)) } catch (_: Exception) { }
+        try { t.setPitch(p.getFloat("pitch", 1.0f)) } catch (_: Exception) { }
+        val want = p.getString("voice", "") ?: ""
+        val v = (if (want.isNotEmpty()) csVoices().firstOrNull { it.name == want } else null) ?: bestLocalVoice()
+        if (v != null) try { t.voice = v } catch (_: Exception) { }
+    }
+
+    /** An online voice that fails (no signal) falls back to the best offline voice and says the sentence again. */
+    private val ttsListener = object : UtteranceProgressListener() {
+        override fun onStart(utteranceId: String?) { }
+        override fun onDone(utteranceId: String?) { if (utteranceId != null) ttsTexts.remove(utteranceId) }
+        @Deprecated("Deprecated in Java")
+        override fun onError(utteranceId: String?) { onError(utteranceId, -1) }
+        override fun onError(utteranceId: String?, errorCode: Int) {
+            val text = utteranceId?.let { ttsTexts.remove(it) } ?: return
+            val t = tts ?: return
+            val cur = try { t.voice } catch (_: Exception) { null }
+            if (cur == null || !cur.isNetworkConnectionRequired) return
+            val local = bestLocalVoice() ?: return
+            main.post {
+                try { t.voice = local; val id = "ab" + (ttsN++); t.speak(text, TextToSpeech.QUEUE_FLUSH, null, id) } catch (_: Exception) { }
+            }
+        }
+    }
+
+    private fun voiceLabel(v: Voice): String {
+        val q = when { v.quality >= Voice.QUALITY_VERY_HIGH -> "nejvyšší kvalita"; v.quality >= Voice.QUALITY_HIGH -> "vysoká kvalita"; v.quality >= Voice.QUALITY_NORMAL -> "běžná kvalita"; else -> "nízká kvalita" }
+        return q + if (v.isNetworkConnectionRequired) " · online, bere data" else " · v telefonu"
     }
 
     override fun onNewIntent(intent: Intent?) {
@@ -248,7 +310,52 @@ class MainActivity : Activity() {
         fun say(text: String, flush: Boolean) {
             val t = tts ?: return
             if (ttsState != 1) return
-            try { t.speak(text, if (flush) TextToSpeech.QUEUE_FLUSH else TextToSpeech.QUEUE_ADD, null, "ab" + (ttsN++)) } catch (_: Exception) { }
+            val id = "ab" + (ttsN++)
+            ttsTexts[id] = text
+            if (ttsTexts.size > 20) ttsTexts.keys.take(ttsTexts.size - 20).forEach { ttsTexts.remove(it) }
+            try { t.speak(text, if (flush) TextToSpeech.QUEUE_FLUSH else TextToSpeech.QUEUE_ADD, null, id) } catch (_: Exception) { }
+        }
+
+        /** Czech voices on this phone, for the voice picker. */
+        @JavascriptInterface
+        fun ttsVoices(): String {
+            val o = JSONObject()
+            val t = tts
+            val engines = try { t?.engines ?: emptyList() } catch (_: Exception) { emptyList() }
+            val pkg = ttsEnginePkg ?: try { t?.defaultEngine } catch (_: Exception) { null }
+            o.put("engine", engines.firstOrNull { it.name == pkg }?.label ?: (pkg ?: ""))
+            o.put("google", ttsEnginePkg != null)
+            o.put("cur", try { t?.voice?.name ?: "" } catch (_: Exception) { "" })
+            o.put("pick", ttsPrefs.getString("voice", "") ?: "")
+            o.put("rate", ttsPrefs.getFloat("rate", 1.05f).toDouble())
+            o.put("pitch", ttsPrefs.getFloat("pitch", 1.0f).toDouble())
+            val best = bestLocalVoice()?.name
+            val arr = JSONArray()
+            csVoices().sortedWith(compareBy<Voice> { it.isNetworkConnectionRequired }.thenByDescending { it.quality }.thenBy { it.name })
+                .forEach { v -> arr.put(JSONObject().put("n", v.name).put("l", voiceLabel(v)).put("q", v.quality).put("net", v.isNetworkConnectionRequired).put("best", v.name == best)) }
+            o.put("voices", arr)
+            return o.toString()
+        }
+
+        /** "" = automatically the best offline voice. */
+        @JavascriptInterface
+        fun setVoice(name: String) { ttsPrefs.edit().putString("voice", name).apply(); main.post { applyTtsPrefs() } }
+
+        @JavascriptInterface
+        fun setSpeech(rate: Float, pitch: Float) {
+            ttsPrefs.edit().putFloat("rate", rate.coerceIn(0.6f, 1.8f)).putFloat("pitch", pitch.coerceIn(0.6f, 1.5f)).apply()
+            main.post { applyTtsPrefs() }
+        }
+
+        /** Store page of Google's speech engine (the best Czech voice), or its settings when installed. */
+        @JavascriptInterface
+        fun openTtsInstall() {
+            main.post {
+                try { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("market://details?id=com.google.android.tts")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+                catch (e: Exception) {
+                    try { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://play.google.com/store/apps/details?id=com.google.android.tts")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) } catch (_: Exception) { }
+                }
+            }
         }
 
         @JavascriptInterface

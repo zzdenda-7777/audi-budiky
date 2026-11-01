@@ -40,7 +40,7 @@ function onCarCluster(){
 }
 function saveTest(id, res){
   const c = carObj(CAR || '_none');
-  const rec = { t: Date.now(), v: res.v, sum: res.sum || '', rows: res.rows || [], num: res.num || null, prof: PROFILE.id };
+  const rec = { t: Date.now(), v: res.v, sum: res.sum || '', rows: res.rows || [], num: res.num || null, prof: PROFILE.id, score: res.score != null ? res.score : null, grade: res.grade || null };
   c.tests[id] = rec; c.log.unshift(Object.assign({ id }, rec)); c.log = c.log.slice(0, 40);
   saveHist(true);
 }
@@ -125,8 +125,8 @@ function engineTick(dt){
   if (cool != null) {
     if (cool < 70) { ENGST.wasCold = true; if (TRIP && TRIP.coldStart == null && TRIP.warmSec == null) TRIP.coldStart = Date.now(); }
     if (ENGST.wasCold && cool >= 80 && TRIP && TRIP.coldStart != null && TRIP.warmSec == null) TRIP.warmSec = Math.round((Date.now() - TRIP.coldStart) / 1000);
-    if (ENGST.wasCold && cool >= 80) { ENGST.wasCold = false; ENGST.warmUntil = Date.now() + 8000; beep('warm', 'done', 0, 'Motor zahřátý'); }
-    if (cool < 60 && rpm != null && rpm > 2500) beep('warm', 'info', 45000, 'Studený motor, uber plyn');
+    if (ENGST.wasCold && cool >= 80) { ENGST.wasCold = false; ENGST.warmUntil = Date.now() + 8000; beep('warm', 'done', 0, 'Motor je zahřátý'); }
+    if (cool < 60 && rpm != null && rpm > 2500) beep('warm', 'info', 45000, 'Motor je ještě studený, uber plyn');
   }
   const b = boostRel(), iq = fresh('iq', 3000);
   let L = null; if (b != null) L = b; if (iq != null) L = Math.max(L == null ? 0 : L, iq / 40 * 1.2);
@@ -134,7 +134,7 @@ function engineTick(dt){
   if (L != null && L > 0.5) ENGST.heat = Math.min(120, ENGST.heat + dt * (L - 0.5) * 8);
   else ENGST.heat = Math.max(0, ENGST.heat - dt * (idle ? 1 : 0.5));
   if (idle && ENGST.heat >= 10) ENGST.cd = true;
-  if (ENGST.cd && ENGST.heat <= 0.5) { ENGST.cd = false; if (idle) { ENGST.cdDoneUntil = Date.now() + 8000; beep('cool', 'done', 0, 'Turbo vychladlé, můžeš vypnout motor'); } }
+  if (ENGST.cd && ENGST.heat <= 0.5) { ENGST.cd = false; if (idle) { ENGST.cdDoneUntil = Date.now() + 8000; beep('cool', 'done', 0, 'Turbo je vychladlé, můžeš vypnout motor'); } }
 }
 function engineBanners(){
   const out = [];
@@ -201,7 +201,7 @@ function renderHistory(){
       ['Najeto', fmt(HIST.trips.filter(t => t.car === c.id).reduce((s, t) => s + t.km, 0), 0) + ' km']]) +
     '<p class="note mono" style="margin:8px 0 0;word-break:break-word">' + esc(c.ecu || '') + (c.clu ? '<br>' + esc(c.clu) : '') + '</p></div>';
   const tests = TESTS.filter(t => c.tests && c.tests[t.id]);
-  h += '<div class="lbl2">Poslední výsledky testů</div>' + (tests.length ? '<div class="card">' + tests.map(t => { const r = c.tests[t.id]; return '<div class="switch"><span class="sw-t">' + t.name + '<small>' + dateTxt(r.t) + ' · ' + esc(r.sum) + '</small></span>' + verdHTML(r.v) + '</div>'; }).join('') + '</div>' : '<p class="note">Zatím žádný test. Najdeš je v záložce Testy.</p>');
+  h += '<div class="lbl2">Poslední výsledky testů</div>' + (tests.length ? '<div class="card">' + tests.map(t => { const r = c.tests[t.id]; return '<div class="switch"><span class="sw-t">' + t.name + '<small>' + dateTxt(r.t) + ' · ' + esc(r.sum) + '</small></span>' + gradeHTML(r) + '</div>'; }).join('') + '</div>' : '<p class="note">Zatím žádný test. Najdeš je v záložce Testy.</p>');
   const acc = Object.keys(c.acc || {});
   if (acc.length) h += '<div class="lbl2">Nejlepší časy</div><div class="card">' + kvRows(acc.map(m => [m.replace('-', '–') + ' km/h', fmt(c.acc[m].best, 2) + ' s'])) + '</div>';
   const fe = c.faults && c.faults.eng, fc = c.faults && c.faults.clu;

@@ -67,7 +67,7 @@ function onFaultsData(d){
   if (d.err) FLT[key] = { t: Date.now(), err: d.err };
   else {
     const list = (d.f || []).map(x => ({ c: x.c, s: x.s })); FLT[key] = { t: Date.now(), list }; saveFaults(d.u, list);
-    beep('drive', 'info', 0, list.length ? 'Našel jsem ' + list.length + (list.length === 1 ? ' chybu' : list.length < 5 ? ' chyby' : ' chyb') : 'Žádné chyby');
+    beep('drive', 'info', 0, list.length ? 'V paměti ' + (list.length >= 2 && list.length <= 4 ? 'jsou ' : 'je ') + list.length + ' ' + czPl(list.length, 'chyba', 'chyby', 'chyb') : 'Paměť chyb je čistá');
   }
   if (curView === 'more' && moreSub === 'faults') renderFaults();
 }
@@ -98,7 +98,7 @@ function readFaultsNow(unit){
 /* ---------- recordings ---------- */
 function onRecState(s){
   if (s.on) { REC = { on: true, start: Date.now(), name: s.name, msg: '' }; beep('drive', 'info', 0, 'Nahrávám jízdu'); }
-  else { REC.on = false; REC.msg = s.msg || ''; if (s.msg) { showToast('Záznam uložen'); beep('drive', 'info', 0, 'Záznam uložen'); } }
+  else { REC.on = false; REC.msg = s.msg || ''; if (s.msg) { showToast('Záznam uložen'); beep('drive', 'info', 0, 'Jízda je uložená'); } }
   $('recBadge').classList.toggle('on', REC.on);
   if (curView === 'more' && moreSub === 'recs') renderRecs();
 }
@@ -151,8 +151,8 @@ function renderSettings(){
 
 /* ---------- sounds ---------- */
 const SND_TEST = { shift: 'shift', turbo: 'alarm', temp: 'alarm', volt: 'info', smoke: 'info', warm: 'done', cool: 'done', timing: 'start', conn: 'conn', drive: 'info' };
-const SND_SAY = { shift: 'řaď', turbo: 'Nedotlak turba', temp: 'Vysoká teplota vody, 110 stupňů', volt: 'Alternátor nenabíjí, 12,6 voltu', smoke: 'Bohatá směs, kouří',
-  warm: 'Motor zahřátý', cool: 'Turbo vychladlé, můžeš vypnout motor', timing: '0 až 100 za 9,8 sekundy', conn: 'Spojení obnoveno', drive: 'Dochází nafta' };
+const SND_SAY = { shift: 'Řaď.', turbo: 'Turbo nedotahuje tlak.', temp: 'Voda je moc horká, 110 stupňů.', volt: 'Alternátor nenabíjí, jen 12,6 voltu.', smoke: 'Bohatá směs, motor kouří.',
+  warm: 'Motor je zahřátý.', cool: 'Turbo je vychladlé, můžeš vypnout motor.', timing: 'Turbo: výborné, 92 bodů.', conn: 'Spojení je zpátky.', drive: 'Dochází nafta, zbývá asi 8 litrů.' };
 /* which thresholds a sound category uses, shown as editable rows */
 const SND_LIMS = {
   shift: [['shiftRpm', 'Řadit při', 'ot/min', 100, 1500, 6000]],
@@ -175,13 +175,45 @@ const SND_WHEN = {
 };
 function limVal(key){ return key === 'shiftRpm' ? CFG.shiftRpm : CFG.lim[key]; }
 function limSet(key, v){ if (key === 'shiftRpm') CFG.shiftRpm = v; else CFG.lim[key] = v; }
+/* voice picker: which Czech voice, how fast and how high it speaks */
+function voiceSample(){ return PROFILE.say + ' připojena. Voda má 90 stupňů, turbo drží tlak.'; }
+function voiceTry(){ if (A && A.say && ttsOk()) A.say(voiceSample(), true); }
+function voiceCardHTML(ts){
+  if (!CFG.voice || ts !== 1) return '';
+  let vi = null; try { vi = A && A.ttsVoices ? JSON.parse(A.ttsVoices()) : null; } catch (_) {}
+  if (!vi) return '';
+  const vs = vi.voices || [], best = vs.find(v => v.best);
+  const opt = (n, t, sub, on) => '<button class="vopt' + (on ? ' on' : '') + '" data-voice="' + esc(n) + '"><b>' + t + '</b><span>' + sub + '</span></button>';
+  let h = '<div class="card"><div class="lbl2" style="margin-top:0">Hlas</div>';
+  if (vs.length) {
+    h += '<div class="vlist">' + opt('', 'Automaticky', 'nejlepší hlas v telefonu' + (best ? ' (' + esc(best.l.split(' · ')[0]) + ')' : ''), !vi.pick) +
+      vs.map((v, i) => opt(v.n, 'Hlas ' + (i + 1) + (v.best ? ' · doporučený' : ''), esc(v.l), vi.pick === v.n)).join('') + '</div>' +
+      (vs.some(v => v.net) ? '<p class="note" style="margin:6px 0 0">Online hlas zní nejlíp, ale bere mobilní data. Bez signálu se aplikace sama přepne na hlas v telefonu.</p>' : '');
+  }
+  const sl = (id, t, v, mn, mx) => '<div class="vslide"><span>' + t + '</span><input type="range" id="' + id + '" min="' + mn + '" max="' + mx + '" step="0.05" value="' + v + '"><b id="' + id + 'V">' + fmt(v, 2) + '×</b></div>';
+  h += sl('vRate', 'Rychlost', vi.rate || 1.05, 0.8, 1.4) + sl('vPitch', 'Výška', vi.pitch || 1, 0.8, 1.25) +
+    '<button class="btn small" id="vTry" style="margin-top:10px">Přehrát ukázku</button>';
+  if (!vi.google) h += '<p class="note" style="margin:10px 0 0">Nejlepší češtinu má hlasový modul od Googlu („Převod textu na řeč Google“). V telefonu ho nemáš, nainstaluj si ho a pak v něm stáhni češtinu.</p><button class="btn small" id="vGet" style="margin-top:8px">Otevřít v Obchodě Play</button>';
+  else if (!vs.some(v => v.q >= 400)) h += '<p class="note" style="margin:10px 0 0">Lepší hlas: Nastavení předčítání → Google → Nainstalovat hlasová data → Čeština. Stáhni hlas ve vysoké kvalitě.</p>';
+  if (vi.engine) h += '<p class="note" style="margin:8px 0 0">Hlasový modul: ' + esc(vi.engine) + '</p>';
+  return h + '</div>';
+}
+function bindVoiceCard(){
+  const rate = $('vRate'), pitch = $('vPitch'); if (!rate) return;
+  const upd = () => { $('vRateV').textContent = fmt(+rate.value, 2) + '×'; $('vPitchV').textContent = fmt(+pitch.value, 2) + '×'; };
+  rate.oninput = pitch.oninput = upd;
+  rate.onchange = pitch.onchange = () => { upd(); if (A.setSpeech) A.setSpeech(+rate.value, +pitch.value); setTimeout(voiceTry, 150); };
+  $('vTry').onclick = voiceTry;
+  if ($('vGet')) $('vGet').onclick = () => { if (A.openTtsInstall) A.openTtsInstall(); };
+  $('moreBody').querySelectorAll('[data-voice]').forEach(b => b.onclick = () => { if (A.setVoice) A.setVoice(b.dataset.voice); setTimeout(() => { renderSounds(); voiceTry(); }, 200); });
+}
 function renderSounds(){
   let ts = 0; try { ts = A && A.ttsState ? A.ttsState() : 0; } catch (_) {}
   const ttsLine = ts === 1 ? '<span style="color:var(--ok)">✓ čeština v telefonu je</span>' : ts === 2 ? '<span style="color:var(--warn)">V telefonu chybí čeština pro předčítání – zatím se pípá.</span>' : ts === 3 ? '<span style="color:var(--warn)">Předčítání v telefonu nefunguje – zatím se pípá.</span>' : 'Hlas se načítá…';
   $('moreBody').innerHTML = '<div class="card">' + togRow('sndAll', 'Zvuky', 'hlavní vypínač', CFG.sound) +
     '<div class="lbl2">Jak upozorňovat</div><div class="seg" id="sndMode"><button data-m="voice">Hlasem</button><button data-m="beep">Pípnutím</button></div>' +
     '<p class="note" style="margin:8px 0 0">' + ttsLine + (CFG.voice ? '<br>Hlas mluví jako navigace – když hraje rádio přes Bluetooth, ztiší ho a promluví do reproduktorů auta.' : '') + '</p>' +
-    (CFG.voice && (ts === 2 || ts === 3) ? '<button class="btn small" id="ttsSet" style="margin-top:8px">Nastavení předčítání v telefonu</button>' : '') + '</div>' +
+    (CFG.voice && (ts === 2 || ts === 3) ? '<button class="btn small" id="ttsSet" style="margin-top:8px">Nastavení předčítání v telefonu</button>' : '') + '</div>' + voiceCardHTML(ts) +
     '<div class="card">' + SND_CATS.map(c => '<div class="switch"><span class="sw-t">' + c[1] + '<small>' + (CFG.voice ? '„' + esc(SND_SAY[c[0]]) + '“' : c[2]) + '</small></span><button class="ibtn" data-try="' + c[0] + '" aria-label="Přehrát">' + ICON.sound + '</button><button class="tog' + (CFG.snd[c[0]] ? ' on' : '') + '" data-snd="' + c[0] + '" aria-label="' + c[1] + '"></button></div>' +
       (SND_WHEN[c[0]] ? '<div class="sndwhen"><b>Kdy:</b> ' + esc(SND_WHEN[c[0]]) + '</div>' : '') +
       ((CFG.snd[c[0]] && SND_LIMS[c[0]]) ? SND_LIMS[c[0]].map(l => '<div class="switch" style="padding-left:12px"><span class="sw-t" style="color:var(--muted)">' + l[1] + '</span><input class="num-in" id="lim_' + l[0] + '" type="number" inputmode="decimal" step="' + l[3] + '" value="' + fmt(limVal(l[0]), l[3] < 1 ? 1 : 0).replace(',', '.') + '"><span style="color:var(--muted);font-size:13px;width:3em">' + l[2] + '</span></div>').join('') : '')).join('') +
@@ -189,6 +221,7 @@ function renderSounds(){
   $('sndAll').onclick = () => { CFG.sound = !CFG.sound; saveCfg(); renderSounds(); };
   $('sndMode').querySelectorAll('button').forEach(b => { b.classList.toggle('on', (b.dataset.m === 'voice') === !!CFG.voice); b.onclick = () => { CFG.voice = b.dataset.m === 'voice'; saveCfg(); renderSounds(); }; });
   if ($('ttsSet')) $('ttsSet').onclick = () => { if (A && A.openTtsSettings) A.openTtsSettings(); };
+  bindVoiceCard();
   Object.values(SND_LIMS).flat().forEach(l => { const el = $('lim_' + l[0]); if (!el) return; el.onchange = e => { const v = parseFloat(String(e.target.value).replace(',', '.')); if (isFinite(v) && v >= l[4] && v <= l[5]) { limSet(l[0], v); saveCfg(); } else e.target.value = fmt(limVal(l[0]), l[3] < 1 ? 1 : 0).replace(',', '.'); }; });
   $('moreBody').querySelectorAll('[data-snd]').forEach(b => b.onclick = () => { const k = b.dataset.snd; CFG.snd[k] = !CFG.snd[k]; saveCfg(); renderSounds(); });
   $('moreBody').querySelectorAll('[data-try]').forEach(b => b.onclick = () => {

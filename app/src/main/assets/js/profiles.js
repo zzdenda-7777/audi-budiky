@@ -4,10 +4,10 @@
    Hella bulletin (MAF 81 kW TDI 850–1050 mg at 3000 rpm), forum practice for the V6 MAF (new ≈ 840 mg, replace < 750 mg). */
 
 const PROFILES = {
-  a4v6: { id: 'a4v6', name: 'Audi A4 B6 2.5 TDI V6 (2003)', short: 'A4 2.5 TDI', engine: 'BDG · 120 kW · 310 Nm · čerpadlo VP44', cyl: 6, kw: 120, nm: 310, mass: 1620,
+  a4v6: { id: 'a4v6', say: 'Áčtyřka', name: 'Audi A4 B6 2.5 TDI V6 (2003)', short: 'A4 2.5 TDI', engine: 'BDG · 120 kW · 310 Nm · čerpadlo VP44', cyl: 6, kw: 120, nm: 310, mass: 1620,
     smooth: [1.5, 2.5], mafMin: [800, 750], mafNote: 'nová MAF má kolem 840 mg, pod 750 mg je na výměnu', idle: [700, 950],
     boost: [1900, 2300], iqIdle: [2, 9], iqFull: [45, 58], acc0100: 9.3, pump: 'VP44' },
-  a6r4: { id: 'a6r4', name: 'Audi A6 C5 1.9 TDI (1998)', short: 'A6 1.9 TDI', engine: 'AFN · 81 kW · 235 Nm · čerpadlo VE', cyl: 4, kw: 81, nm: 235, mass: 1530,
+  a6r4: { id: 'a6r4', say: 'Ášestka', name: 'Audi A6 C5 1.9 TDI (1998)', short: 'A6 1.9 TDI', engine: 'AFN · 81 kW · 235 Nm · čerpadlo VE', cyl: 4, kw: 81, nm: 235, mass: 1530,
     smooth: [2.0, 3.0], mafMin: [850, 800], mafNote: 'podle Hella 850–1050 mg při 3000 ot.', idle: [800, 1000],
     boost: [1750, 2080], iqIdle: [2, 9], iqFull: [42, 50], acc0100: 10.9, pump: 'VE' }
 };

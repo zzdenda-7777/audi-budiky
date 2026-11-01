@@ -121,7 +121,7 @@ function shiftCheck(){
   const rpm = fresh('rpm', 1500); if (rpm == null) return;
   const onGas = (fresh('iq', 2500) || 0) > 15 || (boostRel() || 0) > 0.3;
   if (shiftArmed && rpm >= CFG.shiftRpm && onGas) {
-    shiftArmed = false; beep('shift', 'shift', 0, 'řaď');
+    shiftArmed = false; beep('shift', 'shift', 0, 'Řaď');
     if (CFG.sound && CFG.snd.shift && curView === 'drive') flashShift();
   } else if (rpm < CFG.shiftRpm - 400) shiftArmed = true;
 }
@@ -131,11 +131,11 @@ window.onStatus = s => {
   const prev = S.state;
   S.state = s.state || (s.ok ? 'live' : 'idle'); S.stText = s.text || '';
   if (S.state === 'live' && prev !== 'live') {
-    if (prev !== 'faults' && prev !== 'cluster') beep('conn', 'conn', 3000, S.everLive ? 'Spojení obnoveno' : 'Připojeno, ' + PROFILE.short);
+    if (prev !== 'faults' && prev !== 'cluster') beep('conn', 'conn', 3000, S.everLive ? 'Spojení je zpátky' : PROFILE.say + ' připojena');
     S.everLive = true; S.liveSince = Date.now();
     if (CFG.autoRec && !REC.on && A && A.recStart) A.recStart();
   }
-  if (prev === 'live' && S.state === 'retry') beep('conn', 'lost', 3000, 'Spojení se ztratilo');
+  if (prev === 'live' && S.state === 'retry') beep('conn', 'lost', 3000, 'Spojení s autem se ztratilo');
   if (S.state === 'idle' && prev !== 'idle') {
     if (REC.on && CFG.autoRec && A && A.recStop) A.recStop();
     saveTrip(); saveHist(true); FLT.busy = null;
@@ -165,7 +165,7 @@ window.onLog = o => onLogData(o);
 window.onRec = s => onRecState(s);
 window.onGps = d => {
   if (!d || d.v == null) return;
-  if (!S.gpsEver) { S.gpsEver = true; beep('drive', 'info', 0, 'GPS připravena'); }
+  if (!S.gpsEver) { S.gpsEver = true; beep('drive', 'info', 0, 'GPS je připravená'); }
   S.gpsV = d.v; S.gpsT = performance.now(); S.gpsAcc = d.acc;
   testsGps(d.v, d.t, performance.now());
   routeGps(d);

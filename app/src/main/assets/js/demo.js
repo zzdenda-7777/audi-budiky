@@ -3,6 +3,9 @@
 (function(){
   if (window.Android) return;
   const LS = { get(k){ try { return localStorage.getItem('ab.' + k) || ''; } catch (_) { return ''; } }, set(k, v){ try { localStorage.setItem('ab.' + k, v); } catch (_) {} } };
+  const csVoices = () => { try { return speechSynthesis.getVoices().filter(v => /^cs/i.test(v.lang)); } catch (_) { return []; } };
+  const bestVoice = vs => vs.slice().sort((a, b) => (/natural|neural|online|premium|enhanced|google/i.test(b.name) ? 1 : 0) - (/natural|neural|online|premium|enhanced|google/i.test(a.name) ? 1 : 0))[0] || null;
+  const demoVoice = () => { const vs = csVoices(), n = LS.get('ttsVoice'); return (n && vs.find(v => v.name === n)) || bestVoice(vs); };
   const call = (fn, arg) => setTimeout(() => { if (window[fn]) window[fn](arg); }, 0);
   let plan = [11, 1, 11, 3], pi = 0, running = false, gTimer = null, cTimer = null, gpsTimer = null, cluOn = true, cluNow = false, faultsReq = 0;
   const car = { t: 0, cool: 46, speed: 0, rpm: 820, iq: 5, spec: 1000, act: 1000, maf: 280, mafS: 290 };
@@ -91,7 +94,13 @@
     setAddress(){}, setClusterOnConnect(b){ cluOn = !!b; }, setClusterPeriod(){},
     readClusterNow(){ cluNow = true; }, readFaults(u){ faultsReq = u === 0x17 ? 0x17 : 1; if (u === 0x17) setTimeout(() => call('onFaults', { u: 0x17, f: [] }), 2500); },
     beep(k){ (window.__beeps = window.__beeps || []).push(k); },
-    say(t){ (window.__says = window.__says || []).push(t); try { const u = new SpeechSynthesisUtterance(t); u.lang = 'cs-CZ'; speechSynthesis.speak(u); } catch (_) {} },
+    say(t, flush){ (window.__says = window.__says || []).push(t);
+      try { if (flush) speechSynthesis.cancel(); const u = new SpeechSynthesisUtterance(t), v = demoVoice(); u.lang = 'cs-CZ'; if (v) u.voice = v;
+        u.rate = parseFloat(LS.get('ttsRate') || '1.05'); u.pitch = parseFloat(LS.get('ttsPitch') || '1'); speechSynthesis.speak(u); } catch (_) {} },
+    ttsVoices(){ const vs = csVoices(), b = bestVoice(vs);
+      return JSON.stringify({ engine: 'prohlížeč', google: true, pick: LS.get('ttsVoice'), rate: parseFloat(LS.get('ttsRate') || '1.05'), pitch: parseFloat(LS.get('ttsPitch') || '1'),
+        voices: vs.map(v => ({ n: v.name, l: v.name + (v.localService ? ' · v telefonu' : ' · online'), q: /natural|neural|online|premium|enhanced|google/i.test(v.name) ? 400 : 300, net: !v.localService, best: v === b })) }); },
+    setVoice(n){ LS.set('ttsVoice', n || ''); }, setSpeech(r, p){ LS.set('ttsRate', String(r)); LS.set('ttsPitch', String(p)); }, openTtsInstall(){},
     ttsState(){ return 1; }, openTtsSettings(){}, setBrightness(v){ window.__bright = v; }, kvDel(k){ try { localStorage.removeItem('ab.' + k); } catch (_) {} },
     gpsStart(){ clearInterval(gpsTimer); call('onGpsState', 'GPS zapnutá');
       const pos = { lat: 50.0755, lon: 14.4378, hd: 0.6 };
