@@ -191,6 +191,48 @@ class Elm327(private val link: ObdLink, private val trace: (String) -> Unit) {
         return out.distinctBy { it.code }
     }
 
+    /** Sends a request only when it is read-only (see [isReadOnly]); anything else is refused before it reaches the car. */
+    fun raw(req: String, timeoutMs: Long = 2500): List<String> {
+        if (!isReadOnly(req)) throw ElmError("Požadavek $req by nebyl jen čtení – aplikace ho neposílá")
+        return cmd(req.replace(" ", "").uppercase(), timeoutMs)
+    }
+
+    class ProbeHit(val id: Int, val data: String)
+    class ProbeResult(val hits: List<ProbeHit>, val refused: Int, val noData: Int, val info: List<Pair<String, String>>)
+
+    /**
+     * One-off survey of what the engine unit tells beyond standard OBD, strictly read-only:
+     * mode 09 identification (calibration ID, unit name) and KWP2000 ReadDataByLocalIdentifier 21 00…21 FF.
+     * Positive answers ("61 xx …") are returned raw – what they mean is worked out from the report, nothing is guessed here.
+     */
+    fun probeLocal(onProgress: (Int) -> Unit = {}): ProbeResult {
+        val info = ArrayList<Pair<String, String>>()
+        for (q in listOf("0900", "0904", "0906", "090A")) {
+            try { info.add(q to raw(q, 4000).joinToString(" | ")) } catch (e: ElmError) { info.add(q to (e.message ?: "?")) }
+        }
+        val hits = ArrayList<ProbeHit>()
+        var refused = 0; var noData = 0; var errs = 0
+        for (id in 0x00..0xFF) {
+            if (id % 8 == 0) onProgress(id)
+            val req = "21%02X".format(id)
+            try {
+                val all = joined(raw(req, 1500))
+                val p = all.indexOf(0x61)
+                if (p >= 0 && all.getOrNull(p + 1) == id) {
+                    hits.add(ProbeHit(id, all.drop(p + 2).joinToString(" ") { "%02X".format(it) }))
+                } else refused++                                   // 7F 21 xx: the unit refuses this one
+                errs = 0
+            } catch (e: ElmNoData) { noData++; errs = 0 }
+            catch (e: ElmError) {
+                if (e.message?.contains("(odpověď ?)") == true) throw ElmError("Adaptér odmítá požadavky 21xx (odpověď ?), průzkum nejde")
+                if (++errs >= 6) throw ElmError("Průzkum přerušen: ${e.message}")
+            }
+        }
+        onProgress(0x100)
+        trace("průzkum 21xx: odpovědi ${hits.size}, odmítnuto $refused, bez odpovědi $noData")
+        return ProbeResult(hits, refused, noData, info)
+    }
+
     /** Vehicle identification number (mode 09 PID 02). Older cars often don't support it – then "". */
     fun readVin(): String {
         val r = try { cmd("0902", 5000) } catch (e: ElmError) { trace("VIN: ${e.message}"); return "" }
@@ -212,6 +254,16 @@ class Elm327(private val link: ObdLink, private val trace: (String) -> Unit) {
     }
 
     companion object {
+        /**
+         * Requests the app may send to a car: OBD modes 01/02 (values), 03/07/0A (read fault codes), 09 (identification),
+         * KWP2000 21/22 (read data by identifier). Never 04 (clear codes), 10 (sessions), 2E/3B (write), 2F/30/31 (actuators), 27 (security).
+         */
+        fun isReadOnly(req: String): Boolean {
+            val h = req.replace(" ", "").uppercase()
+            if (h.length < 2 || h.length % 2 != 0 || !h.all { it.isDigit() || it in 'A'..'F' }) return false
+            return h.substring(0, 2) in setOf("01", "02", "03", "07", "09", "0A", "21", "22")
+        }
+
         /** Hex bytes of one answer line; tolerates "41 0C 1A F8", "410C1AF8" and CAN frame indexes like "0: 49 02". */
         fun bytes(line: String): List<Int> {
             var l = line.trim()
@@ -263,18 +315,29 @@ class Elm327(private val link: ObdLink, private val trace: (String) -> Unit) {
                 0x0F -> r(a - 40.0, "°C")                  // intake air temperature
                 0x10 -> r((a * 256 + b) / 100.0, "g/s")     // MAF
                 0x11 -> r(a * 100.0 / 255, "%")             // throttle
+                0x0A -> r(a * 3.0, "kPa")                  // fuel pressure (gauge)
+                0x1C -> r(a.toDouble(), "")                 // which OBD standard the car follows (6 = EOBD)
                 0x1F -> r((a * 256 + b).toDouble(), "s")    // run time since start
                 0x21 -> r((a * 256 + b).toDouble(), "km")   // distance with MIL on
+                0x22 -> r((a * 256 + b) * 0.079, "kPa")     // fuel rail pressure relative to manifold
                 0x23 -> r((a * 256 + b) * 10.0, "kPa")      // fuel rail gauge pressure (diesel)
+                0x30 -> r(a.toDouble(), "")                 // warm-ups since codes cleared
                 0x2C -> r(a * 100.0 / 255, "%")             // commanded EGR
                 0x2D -> r(a * 100.0 / 128 - 100, "%")       // EGR error
                 0x2F -> r(a * 100.0 / 255, "%")             // fuel level
                 0x31 -> r((a * 256 + b).toDouble(), "km")   // distance since codes cleared
                 0x33 -> r(a.toDouble(), "kPa")              // barometric pressure
                 0x42 -> r((a * 256 + b) / 1000.0, "V")      // control module voltage
+                0x43 -> r((a * 256 + b) * 100.0 / 255, "%") // absolute load
                 0x46 -> r(a - 40.0, "°C")                  // ambient air temperature
                 0x49 -> r(a * 100.0 / 255, "%")             // accelerator pedal D
+                0x4D, 0x4E -> r((a * 256 + b).toDouble(), "min") // time with MIL on / since codes cleared
+                0x5A -> r(a * 100.0 / 255, "%")             // relative accelerator pedal
                 0x5C -> r(a - 40.0, "°C")                  // engine oil temperature
+                0x5D -> r((a * 256 + b) / 128.0 - 210, "°") // fuel injection timing
+                0x5E -> r((a * 256 + b) / 20.0, "l/h")      // engine fuel rate
+                0x61, 0x62 -> r(a - 125.0, "%")             // driver's demand / actual engine torque
+                0x63 -> r((a * 256 + b).toDouble(), "Nm")   // engine reference torque
                 else -> r(null, "")
             }
         }

@@ -178,7 +178,25 @@ const boostRel = () => { const a = fresh('boostAbs', 3000); return a == null ? n
 const boostSpecRel = () => { const a = fresh('boostSpecAbs', 3000); return a == null ? null : (a - S.base) / 1000; };
 /* air/fuel only from MAF and IQ read close together, otherwise a gear change between the two reads gives nonsense */
 function afr(){ const iq = fresh('iq', 2000), maf = fresh('maf', 2000); if (iq == null || maf == null || iq < 3 || Math.abs(M.iq.t - M.maf.t) > 800) return null; return maf / iq; }
-function lph(){ if (isObd()) return null; const iq = fresh('iq', 4000), rpm = fresh('rpm', 4000); if (iq == null || rpm == null) return null; return Math.max(0, iq * rpm * S.cyl * 30 / 1e6 / 0.835); }
+function lph(){ if (isObd()) return lphObd(); const iq = fresh('iq', 4000), rpm = fresh('rpm', 4000); if (iq == null || rpm == null) return null; return Math.max(0, iq * rpm * S.cyl * 30 / 1e6 / 0.835); }
+/* Peugeot over OBD: the unit's own fuel rate (PID 5E) when it has one. Otherwise an estimate from the calculated load:
+   SAE J1979 defines it for diesels from fuel flow, so load × the engine's full-load injection at these revs ≈ what it injects now.
+   Corrected by a factor learnt from fill-ups (Cesta → Natankoval jsem). */
+function iqMaxAt(rpm){
+  const c = (PROFILE.iqMax && PROFILE.iqMax.length) ? PROFILE.iqMax : [[800, 15], [1750, 30], [4000, 25], [4800, 18]];
+  if (rpm <= c[0][0]) return c[0][1];
+  for (let i = 1; i < c.length; i++) if (rpm <= c[i][0]) { const a = c[i - 1], b = c[i]; return a[1] + (b[1] - a[1]) * (rpm - a[0]) / (b[0] - a[0]); }
+  return c[c.length - 1][1];
+}
+const fuelK = () => { const c = typeof CAR !== 'undefined' && CAR && HIST.cars[CAR]; const k = c && c.fuelK; return (k > 0.5 && k < 2) ? k : 1; };
+/* where the Peugeot's consumption comes from: 'ecu' (PID 5E), 'load' (estimate) or null */
+const fuelSrc = () => !isObd() ? 'iq' : fresh('fuelRate', 4000) != null ? 'ecu' : fresh('load', 4000) != null ? 'load' : null;
+function lphObd(){
+  const fr = fresh('fuelRate', 4000); if (fr != null) return Math.max(0, fr);
+  const ld = fresh('load', 4000), rpm = fresh('rpm', 4000); if (ld == null || rpm == null) return null;
+  if (rpm < 400) return 0;
+  return Math.max(0, ld / 100 * iqMaxAt(rpm) * rpm * S.cyl * 30 / 1e6 / 0.835) * fuelK();
+}
 const gpsSpeed = () => (S.gpsV != null && performance.now() - S.gpsT < 3000) ? S.gpsV : null;
 const speed = () => R.on ? null : (gpsSpeed() != null ? gpsSpeed() : (isObd() ? fresh('spdEcu', 3000) : null));
 function l100(){ const c = lph(), v = speed(); return (c != null && v != null && v > 8) ? c / v * 100 : null; }
@@ -206,8 +224,8 @@ const VAL = [
   { id:'pwr', name:'Výkon', unit:'kW', d:0, cat:'motor', est:true, need:[[1]], get:power,
     sub:() => { const p = power(); return p == null ? '' : fmt(p * 1.36, 0) + ' k'; }, range:[0, 150], step:25 },
   { id:'tq', name:'Moment', unit:'Nm', d:0, cat:'motor', est:true, need:[[1]], get:torque, range:[0, 400], step:100 },
-  { id:'tim', name:'Předvstřik', unit:'°', d:1, cat:'motor', need:[[4]], get:() => fresh('tim'), spec:() => fresh('timSpec'),
-    sub:() => { const s = fresh('timSpec'); return s == null ? '' : 'požad. ' + fmt(s, 1); }, range:[-5, 15], step:5 },
+  { id:'tim', name:'Předvstřik', unit:'°', d:1, cat:'motor', need:[[4]], pid:[0x5D], get:() => fresh('tim'), spec:() => fresh('timSpec'),
+    sub:() => { if (isObd()) return 'začátek vstřiku · z auta'; const s = fresh('timSpec'); return s == null ? '' : 'požad. ' + fmt(s, 1); }, range:[-5, 15], step:5 },
   { id:'lim', name:'Omezení vstřiku', unit:'mg', d:1, cat:'motor', need:[[8]], get:() => fresh('iqReq'),
     sub:() => (fresh('limRpm') == null ? '' : 'limit ' + fmt(fresh('limRpm'), 1) + ' / ' + fmt(fresh('limMaf'), 1)), range:[0, 60], step:10 },
   { id:'ped', name:'Plyn', unit:'%', d:0, cat:'motor', need:[[10, 2]], pid:[0x49, 0x11], get:() => fresh('ped'), range:[0, 100], step:25 },
@@ -220,22 +238,23 @@ const VAL = [
   { id:'oilT', name:'Olej', unit:'°C', d:0, cat:'temp', need:[], clu:true, pid:[0x5C], get:() => any('oilT'),
     sub:() => (S.cluRead && !S.cluHasOil) ? 'panel ji nehlásí' : 'z panelu', range:[40, 150], step:30, warn:v => v > 125, bad:v => v > 140 },
   { id:'spd', name:'Rychlost', unit:'km/h', d:0, cat:'jizda', need:[], gps:true, obd:true, pid:[0x0D], get:speed, sub:() => speed() == null ? gpsHint() : gpsSpeed() != null ? 'GPS' : 'z auta', range:[0, 200], step:50 },
-  { id:'cons', name:'Spotřeba', unit:'l/100', d:1, cat:'jizda', est:true, need:[[1]], gps:true,
+  { id:'cons', name:'Spotřeba', unit:'l/100', d:1, cat:'jizda', est:true, need:[[1]], gps:true, pid:[0x5E, 0x04],
     get:() => { const v = l100(); return v != null ? v : lph(); }, unitNow:() => l100() != null ? 'l/100' : 'l/h',
-    sub:() => (l100() == null && lph() != null) ? (speed() == null ? gpsHint() : 'stojíš') : '', range:[0, 20], step:5 },
-  { id:'avg', name:'Průměr', unit:'l/100', d:1, cat:'jizda', est:true, need:[[1]], gps:true, get:() => tripAvg(), sub:() => 'za tuto jízdu', range:[0, 15], step:5 },
-  { id:'cost', name:'Cena jízdy', unit:'Kč', d:0, cat:'jizda', est:true, need:[[1]], get:() => TRIP ? TRIP.fuel * CFG.price : null,
+    sub:() => (l100() == null && lph() != null) ? (speed() == null ? gpsHint() : 'stojíš') : fuelSrc() === 'load' ? 'ze zatížení' + (fuelK() !== 1 ? ' · dle tankování' : '') : '', range:[0, 20], step:5 },
+  { id:'avg', name:'Průměr', unit:'l/100', d:1, cat:'jizda', est:true, need:[[1]], gps:true, obd:true, get:() => tripAvg(), sub:() => 'za tuto jízdu', range:[0, 15], step:5 },
+  { id:'cost', name:'Cena jízdy', unit:'Kč', d:0, cat:'jizda', est:true, need:[[1]], obd:true, get:() => TRIP ? TRIP.fuel * CFG.price : null,
     sub:() => TRIP ? fmt(TRIP.fuel, 2) + ' l · ' + fmt(CFG.price, 1) + ' Kč/l' : '', range:[0, 500], step:100 },
   { id:'dist', name:'Ujeto', unit:'km', d:1, cat:'jizda', need:[], gps:true, obd:true, get:() => TRIP ? TRIP.km : null, sub:() => TRIP ? 'za ' + durTxt(TRIP.last - TRIP.start) : '', range:[0, 500], step:100 },
-  { id:'range', name:'Dojezd', unit:'km', d:0, cat:'jizda', est:true, need:[[1]], gps:true, get:() => rangeKm(),
-    sub:() => fuelNow() != null ? 'v nádrži ≈ ' + fmt(fuelNow(), 0) + ' l' : 'potřebuje panel a GPS', range:[0, 1000], step:250 },
-  { id:'fuelL', name:'V nádrži', unit:'l', d:0, cat:'jizda', est:true, need:[], clu:true, pid:[0x2F], get:() => isObd() ? fresh('fuelL', 30000) : fuelNow(), sub:() => isObd() ? 'z plováku' : S.cluRead ? 'od načtení panelu' : 'načte se z panelu', range:[0, 70], step:10, warn:v => v < 8 },
+  { id:'range', name:'Dojezd', unit:'km', d:0, cat:'jizda', est:true, need:[[1]], gps:true, obd:true, get:() => rangeKm(),
+    sub:() => fuelNow() != null ? 'v nádrži ≈ ' + fmt(fuelNow(), 0) + ' l' : isObd() ? 'zadej tankování (Cesta)' : 'potřebuje panel a GPS', range:[0, 1000], step:250 },
+  { id:'fuelL', name:'V nádrži', unit:'l', d:0, cat:'jizda', est:true, need:[], clu:true, obd:true, pid:[0x2F], get:() => fuelNow(),
+    sub:() => isObd() ? (fresh('fuelPct', 60000) != null ? 'z plováku v nádrži' : fuelNow() != null ? 'od tankování' : 'zadej tankování (Cesta)') : S.cluRead ? 'od načtení panelu' : 'načte se z panelu', range:[0, 70], step:10, warn:v => v < 8 },
   { id:'volt', name:'Napětí', unit:'V', d:1, cat:'el', need:[[12]], pid:[0x42, 0x100], get:() => fresh('volt', 10000),
     range:[10, 16], step:2, warn:v => v < 12.2 || v > 14.9 },
   { id:'rate', name:'Obnova dat', unit:'/s', d:1, cat:'el', need:[], obd:true, get:readRate, sub:() => isObd() ? 'hodnot za sekundu' : 'skupin za sekundu', range:[0, 10], step:2 },
   /* only over OBD-II (Peugeot) */
   { id:'load', name:'Zatížení', unit:'%', d:0, cat:'motor', need:[], obdOnly:true, pid:[0x04], get:() => fresh('load'), range:[0, 100], step:25 },
-  { id:'rail', name:'Tlak v railu', unit:'bar', d:0, cat:'motor', need:[], obdOnly:true, pid:[0x23], get:() => fresh('rail'), range:[0, 1600], step:400 },
+  { id:'rail', name:'Tlak v railu', unit:'bar', d:0, cat:'motor', need:[], obdOnly:true, pid:[0x23, 0x22], get:() => fresh('rail'), range:[0, 1600], step:400 },
   { id:'mafGs', name:'Vzduch MAF', unit:'g/s', d:1, cat:'turbo', need:[], obdOnly:true, pid:[0x10], get:() => fresh('mafGs'), range:[0, 100], step:25 }
 ];
 const VALBY = {}; VAL.forEach(v => VALBY[v.id] = v);
@@ -286,11 +305,14 @@ function obdIngest(p, v){
       const rpm = fresh('rpm', 3000); if (rpm != null && rpm > 300) setM('maf', v * 1000 / (rpm * S.cyl / 120), src);
       break; }
     case 0x04: setM('load', v, src); break;
-    case 0x23: setM('rail', v / 100, src); break;                 // kPa → bar
+    case 0x23: case 0x22: setM('rail', v / 100, src); break;      // kPa → bar
+    case 0x5D: setM('tim', v, src); break;                        // fuel injection timing, ° (only newer units)
+    case 0x5E: setM('fuelRate', v, src); break;                   // engine fuel rate, l/h (only newer units)
     case 0x42: setM('volt', v, src); break;
     case 0x100: if (!M.volt || M.volt.src !== 'OBD 42' || clock() - M.volt.t > 8000) setM('volt', v, 'ATRV'); break;
     case 0x46: setM('outT', v, src); break;
-    case 0x2F: setM('fuelPct', v, src); setM('fuelL', v * (PROFILE.tank || 50) / 100, src); break;
+    case 0x2F: setM('fuelPct', v, src); setM('fuelL', v * (PROFILE.tank || 50) / 100, src); break;  // only if the unit has the float
+    case 0x5A: setM('ped', v, src); break;
     case 0x2C: setM('egr', v, src); break;
     case 0x49: case 0x11: setM('ped', v, src); break;
     case 0x5C: setM('oilT', v, src); break;
@@ -379,13 +401,14 @@ const ALERTS = [
   { id:'cool', say:() => 'Voda je moc horká, ' + deg(any('cool')), lvl:'warn', snd:'temp', txt:'Vysoká teplota vody', hold:2000, test:() => (fresh('cool', 10000) || 0) > CFG.lim.coolWarn, info:() => fmt(any('cool'), 0) + ' °C' },
   { id:'oil', say:() => 'Olej je moc horký, ' + deg(any('oilT')), lvl:'bad', snd:'temp', txt:'Vysoká teplota oleje', hold:1000, test:() => (any('oilT') || 0) > CFG.lim.oilWarn, info:() => fmt(any('oilT'), 0) + ' °C' },
   { id:'fuel', say:() => 'Palivo je horké, ' + deg(any('fuelT')), lvl:'warn', snd:'temp', txt:'Horké palivo', hold:3000, test:() => (fresh('fuelT', 10000) || 0) > CFG.lim.fuelTWarn, info:() => fmt(any('fuelT'), 0) + ' °C' },
-  { id:'lowfuel', say:() => 'Dochází nafta, zbývá asi ' + litres(any('fuelL')), lvl:'warn', snd:'drive', txt:'Dochází nafta', hold:4000, test:() => { const l = any('fuelL'); return l != null && l < CFG.lim.fuelLow; }, info:() => fmt(any('fuelL'), 0) + ' l' },
+  { id:'lowfuel', say:() => 'Dochází nafta, zbývá asi ' + litres(fuelLeft()), lvl:'warn', snd:'drive', txt:'Dochází nafta', hold:4000, test:() => { const l = fuelLeft(); return l != null && l < CFG.lim.fuelLow; }, info:() => fmt(fuelLeft(), 0) + ' l' },
   { id:'ice', say:() => { const o = any('outT'), a = Math.abs(Math.round(o)); return 'Venku ' + (a >= 2 && a <= 4 ? 'jsou ' : 'je ') + deg(o) + ', pozor na náledí'; }, lvl:'warn', snd:'drive', txt:'Náledí', hold:3000, test:() => { const o = any('outT'); return o != null && o <= 3; }, info:() => fmt(any('outT'), 0) + ' °C' },
   { id:'afr2', say:() => 'Velmi bohatá směs, motor hodně kouří', lvl:'bad', snd:'smoke', txt:'Velmi bohatá směs', hold:800, test:() => { const a = afr(), iq = fresh('iq', 3000) || 0; return a != null && iq > 15 && a < 14; }, info:() => fmt(afr(), 1) + ':1' },
   { id:'afr', say:() => 'Bohatá směs, motor kouří', lvl:'warn', snd:'smoke', txt:'Bohatá směs (kouř)', hold:1000, test:() => { const a = afr(), iq = fresh('iq', 3000) || 0; return a != null && iq > 15 && a < 16; }, info:() => fmt(afr(), 1) + ':1' },
   { id:'maf', say:() => 'Motor má málo vzduchu', lvl:'warn', snd:'turbo', txt:'Málo vzduchu (MAF)', hold:2500, test:() => { const v = fresh('maf', 3000), s = fresh('mafSpec', 3000), rpm = fresh('rpm', 3000) || 0; return v != null && s > 500 && rpm > 1800 && v < s * 0.85; }, info:() => fmt((fresh('maf') / fresh('mafSpec') - 1) * 100, 0) + ' %' },
   { id:'volt', say:() => 'Alternátor nenabíjí, jen ' + n1(any('volt')) + ' voltu', lvl:'warn', snd:'volt', txt:'Alternátor nenabíjí', hold:5000, test:() => { const v = fresh('volt', 8000), rpm = fresh('rpm', 3000) || 0; return v != null && rpm > 700 && v < CFG.lim.voltLow; }, info:() => fmt(any('volt'), 1) + ' V' }
 ];
+function fuelLeft(){ const f = typeof fuelNow === 'function' ? fuelNow() : null; return f != null ? f : isObd() ? null : any('fuelL'); }
 const aState = {};
 function activeAlerts(){
   const t = clock(), out = [];

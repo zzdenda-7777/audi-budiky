@@ -19,7 +19,7 @@ function aggTrips(c){
 }
 function healthScore(c){
   const sc = { ok: 100, mid: 60, bad: 20 }, parts = [];
-  ['turbo', 'maf', 'tim', 'smooth', 'dyno'].forEach(id => { const r = c.tests && c.tests[id]; if (r && sc[r.v] != null) parts.push(sc[r.v]); });
+  ['turbo', 'turboObd', 'idleObd', 'maf', 'tim', 'smooth', 'dyno'].forEach(id => { const r = c.tests && c.tests[id]; if (r && sc[r.v] != null) parts.push(sc[r.v]); });
   const f = c.faults && c.faults.eng; if (f && f.list) parts.push(f.list.length === 0 ? 100 : f.list.length <= 2 ? 60 : 20);
   const a = aggTrips(c);
   if (a.maxCool) parts.push(a.maxCool <= 108 ? 100 : a.maxCool <= 113 ? 60 : 20);
@@ -29,16 +29,27 @@ function healthScore(c){
 const accBest = (c, m) => c.acc && c.acc[m] && c.acc[m].best != null ? c.acc[m].best : null;
 const tscore = (c, id) => c.tests && c.tests[id] && c.tests[id].score != null ? c.tests[id].score : null;
 const nz = v => (v == null || !isFinite(v)) ? null : v;
+/* can this car measure it at all? (the Peugeot over OBD has no injection data, no cluster, no ABS unit…) */
+function carCan(c, test){
+  if (!test) return true;
+  const obd = profOf(c).proto === 'obd';
+  if (test === 'faults') return true;
+  if (test === 'faultsClu') return !obd;
+  const t = typeof TESTBY !== 'undefined' ? TESTBY[test] : null;
+  if (!t) return true;
+  return obd ? !!(t.obd || t.obdOnly) : !t.obdOnly;
+}
 
 /* rows: [group, label, unit, decimals, better, absolute(c, agg), normalised(c, agg) | null, test to measure] ; better: hi | lo | 14 | null */
 const CMP_ROWS = [
   ['Zdraví', 'Celkové zdraví', '/100', 0, 'hi', (c) => { const h = healthScore(c); return h ? h.v : null; }, null, null],
   ['Zdraví', 'Chyby motoru', 'ks', 0, 'lo', c => c.faults && c.faults.eng && c.faults.eng.list ? c.faults.eng.list.length : null, null, 'faults'],
-  ['Zdraví', 'Chyby přístrojů', 'ks', 0, 'lo', c => c.faults && c.faults.clu && c.faults.clu.list ? c.faults.clu.list.length : null, null, 'faults'],
+  ['Zdraví', 'Chyby přístrojů', 'ks', 0, 'lo', c => c.faults && c.faults.clu && c.faults.clu.list ? c.faults.clu.list.length : null, null, 'faultsClu'],
   ['Motor', 'Turbo – odchylka', 'bar', 2, 'lo', c => { const n = tnum(c, 'turbo'); return n && n.meanDev != null ? Math.abs(n.meanDev) : null; }, null, 'turbo'],
   ['Motor', 'Vzduch – % požadavku', '%', 0, 'hi', c => { const n = tnum(c, 'maf'); return n && n.ratio != null ? n.ratio * 100 : null; }, null, 'maf'],
   ['Motor', 'Vzduch ve 3000 ot.', 'mg', 0, 'hi', c => nz(tnum(c, 'maf') && tnum(c, 'maf').at3k), c => { const n = tnum(c, 'maf'); return n && n.at3k ? n.at3k / profOf(c).mafMin[0] * 100 : null; }, 'maf'],
   ['Motor', 'Klidný chod – nejhorší válec', 'mg', 2, 'lo', c => nz(tnum(c, 'smooth') && tnum(c, 'smooth').worst), c => { const n = tnum(c, 'smooth'); return n && n.worst != null ? n.worst / profOf(c).smooth[0] * 100 : null; }, 'smooth'],
+  ['Motor', 'Volnoběh – kolísání otáček', 'ot/min', 0, 'lo', c => nz(tnum(c, 'idleObd') && tnum(c, 'idleObd').sd), null, 'idleObd'],
   ['Motor', 'Předvstřik – odchylka', '°', 2, 'lo', c => { const p = tnum(c, 'pump'), t = tnum(c, 'tim'); return nz(p && p.idleDev != null ? p.idleDev : t && t.mean); }, null, 'pump'],
   ['Motor', 'Čerpadlo – body', '/100', 0, 'hi', c => tscore(c, 'pump'), null, 'pump'],
   ['Motor', 'Čerpadlo – předvstřik pod zátěží', '°', 2, 'lo', c => nz(tnum(c, 'pump') && tnum(c, 'pump').loadDev), null, 'pump'],
@@ -110,12 +121,13 @@ function renderCompare(){
     const [g, label, unit, d, better, fAbs, fNorm, test] = r;
     const useNorm = cmpMode === 'norm' && fNorm;
     const vals = cars.map((c, i) => { let v = null; try { v = useNorm ? fNorm(c, aggs[i]) : fAbs(c, aggs[i]); } catch (_) {} return v == null || !isFinite(v) ? null : v; });
-    if (vals.every(v => v == null) && !test) return; // nothing measured and nothing to measure
+    const can = cars.map(c => carCan(c, test));
+    if (vals.every(v => v == null) && (!test || !can.some(x => x))) return; // nothing measured and nothing any of these cars can measure
     if (g !== grp) { grp = g; h += '<div class="cmpgrp">' + g + '</div>'; }
     const res = judge(vals, better);
     res.forEach((x, i) => { if (x === 'win') wins[i]++; });
     h += '<div class="cmprow" style="' + cols + '"><span class="cl">' + label + '<small>' + (useNorm ? '% normy' : unit) + (better ? '' : ' · bez vítěze') + '</small></span>' +
-      vals.map((v, i) => '<span class="cv ' + res[i] + '">' + (v == null ? (test ? '<i class="cmpm" data-t="' + test + '">změř</i>' : '–') : fmt(v, useNorm ? 0 : d) + (useNorm ? ' %' : '') + (res[i] === 'win' ? ' 🏆' : '')) + '</span>').join('') + '</div>';
+      vals.map((v, i) => '<span class="cv ' + res[i] + '">' + (v == null ? (test && can[i] ? '<i class="cmpm" data-t="' + test + '">změř</i>' : test ? '<small class="cmpna">auto neumí</small>' : '–') : fmt(v, useNorm ? 0 : d) + (useNorm ? ' %' : '') + (res[i] === 'win' ? ' 🏆' : '')) + '</span>').join('') + '</div>';
   });
   h += '</div>';
   if (N >= 2) {
@@ -128,7 +140,8 @@ function renderCompare(){
   $('cmpMode').querySelectorAll('button').forEach(b => { b.classList.toggle('on', b.dataset.m === cmpMode); b.onclick = () => { cmpMode = b.dataset.m; renderCompare(); }; });
   body.querySelectorAll('[data-t]').forEach(el => el.onclick = () => {
     const t = el.dataset.t;
-    if (t === 'faults') { showView('more'); openMore('faults'); }
+    if (t === 'faults' || t === 'faultsClu') { showView('more'); openMore('faults'); }
+    else if (TESTBY[t] && !testFits(TESTBY[t])) showToast('Tohle změříš, až připojíš auto, které to umí');
     else { showView('tests'); openTest(t); }
   });
 }

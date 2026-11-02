@@ -5,7 +5,8 @@ const H = []; // samples {t, b, bs, maf, mafS, iq, afr, rpm, cool}
 function sample(){
   const t = clock();
   if (H.length && t < H[H.length - 1].t) H.length = 0; // replay jumped back
-  H.push({ t, b: boostRel(), bs: boostSpecRel(), maf: fresh('maf', 2500), mafS: fresh('mafSpec', 2500), iq: fresh('iq', 2500), afr: afr(), rpm: fresh('rpm', 2500), cool: fresh('cool', 10000) });
+  H.push({ t, b: boostRel(), bs: boostSpecRel(), maf: fresh('maf', 2500), mafS: fresh('mafSpec', 2500), iq: fresh('iq', 2500), afr: afr(), rpm: fresh('rpm', 2500), cool: fresh('cool', 10000),
+    gs: fresh('mafGs', 2500), ld: fresh('load', 2500), ped: fresh('ped', 2500) });
   while (H.length && H[0].t < t - 185000) H.shift();
 }
 const CH = ['chBoost', 'chMaf', 'chIq', 'chRpm'];
@@ -31,8 +32,34 @@ function drawChart(c, series, lo, hi, fmtY){
     x.stroke();
   });
 }
+/* chart titles differ: the Audis report what the unit asks for, the Peugeot over OBD only the actual values */
+let chartsFor = '';
+function chartTitles(){
+  const k = isObd() ? 'obd' : 'vag'; if (k === chartsFor) return; chartsFor = k;
+  const key = (c, t) => '<span class="k"><i style="background:' + c + '"></i>' + t + '</span>';
+  const T = isObd()
+    ? ['Turbo ' + key('#efe6e3', 'obvyklé max') + key('var(--red)', 'skutečně') + '<span class="k">bar</span>',
+       'Vzduch MAF ' + key('var(--red)', 'skutečně') + '<span class="k">g/s</span>',
+       'Zatížení a plyn ' + key('var(--red)', 'zatížení %') + key('var(--blue)', 'plyn %'),
+       'Otáčky a voda ' + key('var(--red)', 'otáčky ÷40') + key('var(--warn)', 'voda °C')]
+    : ['Turbo ' + key('#efe6e3', 'požad.') + key('var(--red)', 'skutečně') + '<span class="k">bar</span>',
+       'Vzduch MAF ' + key('#efe6e3', 'požad.') + key('var(--red)', 'skutečně') + '<span class="k">mg</span>',
+       'Vstřik a směs ' + key('var(--red)', 'vstřik mg') + key('var(--blue)', 'vzduch/palivo ÷2'),
+       'Otáčky a voda ' + key('var(--red)', 'otáčky ÷40') + key('var(--warn)', 'voda °C')];
+  CH.forEach((id, i) => { const h = $(id) && $(id).parentNode.querySelector('h4'); if (h) h.innerHTML = T[i]; });
+}
 function drawCharts(){
   const red = TH.red, white = TH.text, blue = TH.blue, amber = TH.warn;
+  chartTitles();
+  if (isObd()) {
+    const bm = (PROFILE.boostMax || [0.5, 1.0])[1];
+    drawChart($(CH[0]), [{ get: () => bm, color: white, w: 1 }, { get: p => p.b, color: red }], 0, 1.6, v => fmt(v, 1));
+    const mg = Math.max(40, ...H.map(p => p.gs || 0)) * 1.05;
+    drawChart($(CH[1]), [{ get: p => p.gs, color: red }], 0, mg, v => fmt(v, 0));
+    drawChart($(CH[2]), [{ get: p => p.ld, color: red }, { get: p => p.ped, color: blue }], 0, 100, v => fmt(v, 0));
+    drawChart($(CH[3]), [{ get: p => p.rpm, color: red, scale: v => v / 40 }, { get: p => p.cool, color: amber }], 0, 130, v => fmt(v, 0));
+    return;
+  }
   drawChart($(CH[0]), [{ get: p => p.bs, color: white, w: 1.5 }, { get: p => p.b, color: red }], 0, 2.0, v => fmt(v, 1));
   const mx = Math.max(1000, ...H.map(p => Math.max(p.maf || 0, p.mafS || 0))) * 1.05;
   drawChart($(CH[1]), [{ get: p => p.mafS, color: white, w: 1.5 }, { get: p => p.maf, color: red }], 0, mx, v => fmt(v, 0));

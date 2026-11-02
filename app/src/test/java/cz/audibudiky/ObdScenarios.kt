@@ -111,7 +111,44 @@ object ObdScenarios {
         "příkaz 04 (mazání) se neposílá – aplikace jen čte"
     }
 
+    fun readOnlyGuard(): String {
+        val bad = listOf("04", "14", "10 81", "1081", "2E0101", "3B01", "2F0101", "3001", "3101", "2701", "11", "0x", "")
+        val ok = listOf("0105", "03", "07", "0902", "21A0", "22F190", "0A")
+        bad.forEach { check(!Elm327.isReadOnly(it), "$it nesmí projít (není jen čtení)") }
+        ok.forEach { check(Elm327.isReadOnly(it), "$it je jen čtení, má projít") }
+        return withElm(FakeElm()) { e, f ->
+            e.init(); e.connectCar()
+            var refused = false
+            try { e.raw("04") } catch (x: ElmError) { refused = true }
+            check(refused && f.sent.none { it == "04" }, "raw(04) se nesmí dostat do auta: ${f.sent.takeLast(3)}")
+            "zápis, mazání, akční členy a bezpečnostní přístup se neposílají (${bad.size} zakázaných, ${ok.size} povolených)"
+        }
+    }
+
+    fun psaProbe(): String = withElm(FakeElm()) { e, f ->
+        e.init(); e.connectCar()
+        var prog = 0
+        val r = e.probeLocal { prog = it }
+        check(r.hits.map { it.id } == listOf(0x01, 0xA0, 0xFE), "odpovědi: ${r.hits.map { "%02X".format(it.id) }}")
+        check(r.hits[0].data == "0C D0 5A 80 1F 40", "data 21 01: ${r.hits[0].data}")
+        check(r.refused == 16, "odmítnuto 16, je ${r.refused}")
+        check(prog == 0x100, "průběh došel na konec ($prog)")
+        val carCmds = f.sent.filter { !it.startsWith("AT") }
+        check(carCmds.all { Elm327.isReadOnly(it) }, "průzkum poslal něco jiného než čtení: ${carCmds.filter { !Elm327.isReadOnly(it) }}")
+        "průzkum 21 00–FF: ${r.hits.size} odpovědi, ${r.refused} odmítnuto, ${r.noData} bez odpovědi, jen čtení"
+    }
+
+    fun timingAndFuelRate(): String = withElm(FakeElm()) { e, _ ->
+        e.init(); e.connectCar()
+        val t = e.pid(0x5D).value; val fr = e.pid(0x5E).value
+        check(near(t, 5.0), "začátek vstřiku 5,0 °, je $t"); check(near(fr, 1.0), "spotřeba 1,0 l/h, je $fr")
+        "začátek vstřiku $t °, spotřeba $fr l/h (když je auto hlásí)"
+    }
+
     val ALL: List<Pair<String, () -> String>> = listOf(
+        "Pojistka: posílá jen čtení" to ::readOnlyGuard,
+        "Průzkum jednotky PSA (21xx)" to ::psaProbe,
+        "Začátek vstřiku a spotřeba (PID 5D, 5E)" to ::timingAndFuelRate,
         "Adaptér a protokol auta (206 HDi, linka K)" to ::initAndProtocol,
         "Hodnoty: otáčky, voda, sání, MAF, napětí" to ::decodeValues,
         "Klon bez mezer v odpovědích" to ::noSpacesClone,

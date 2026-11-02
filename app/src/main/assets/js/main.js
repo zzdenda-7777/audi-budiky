@@ -43,11 +43,12 @@ function obdPlan(){
   else if (D.focus) ids = [D.focus.id];
   else if (D.hud) ids = D.hud.vals;
   else if (curView === 'drive' && PAGES[curPage].layout === 'health') ids = ['boost', 'cool', 'volt', 'load', 'iat'];
-  else if (curView === 'charts') ids = ['boost', 'rpm', 'cool', 'load'];
+  else if (curView === 'charts') ids = ['boost', 'rpm', 'cool', 'load', 'mafGs', 'ped'];
   else if (curView === 'more' && moreSub === 'groups') ids = VAL.filter(v => v.pid).map(v => v.id);
-  else if (curView === 'trip') ids = ['rpm', 'spd', 'cool'];
-  else ids = PAGES[curPage].vals;
-  const main = pidsFor(ids), bg = pidsFor(['rpm', 'cool']).filter(p => !main.includes(p));
+  else if (curView === 'trip') ids = ['rpm', 'spd', 'cons', 'cool', 'boost'];
+  else ids = effVals(PAGES[curPage]);
+  /* always in the background: revs, speed and what the consumption is counted from (the trip and tank need it all the time) */
+  const main = pidsFor(ids), bg = pidsFor(['rpm', 'cons', 'spd', 'cool']).filter(p => !main.includes(p));
   if (main.includes(0x0B) && OBD.sup.has(0x33)) bg.push(0x33);
   const out = main.concat(bg);
   return out.length ? out : [0x0C];
@@ -186,13 +187,20 @@ window.onFaults = d => onFaultsData(d);
 /* ---- OBD-II (Peugeot) ---- */
 window.onPid = d => {
   if (R.on || !d) return;
-  if (d.na) { OBD.naN[d.p] = (OBD.naN[d.p] || 0) + 1; if (OBD.naN[d.p] === 3) pushPlan(); return; }
+  if (d.na) { OBD.naN[d.p] = (OBD.naN[d.p] || 0) + 1; if (OBD.naN[d.p] === 3) { if (curView === 'drive' && !D.focus && !D.health) buildPage(); pushPlan(); } return; }
   OBD.naN[d.p] = 0;
   OBD.last[d.p] = { v: d.v, u: d.u, r: d.r, t: Date.now(), ms: d.ms };
   obdIngest(d.p, d.v);
   if (d.p !== 0x100) S.reads.push(clock());
 };
-window.onObdInfo = o => { OBD.info = o || {}; OBD.sup = new Set((o && o.sup) || []); OBD.naN = {}; if (o && o.addr && CFG.btAddr !== o.addr) { CFG.btAddr = o.addr; CFG.btName = o.adapter || ''; saveCfg(); } pushPlan(true); };
+window.onObdInfo = o => {
+  OBD.info = o || {}; OBD.sup = new Set((o && o.sup) || []); OBD.naN = {};
+  if (o && o.addr && CFG.btAddr !== o.addr) { CFG.btAddr = o.addr; CFG.btName = o.adapter || ''; saveCfg(); }
+  KV.set('obd.info', OBD.info);
+  if (curView === 'drive' && !D.focus) buildPage();          // now it's known what this car has: swap tiles it doesn't
+  pushPlan(true);
+};
+window.onObdProbe = d => { if (typeof obdProbeData === 'function') obdProbeData(d); };
 window.onObdFaults = d => {
   if (!d) return;
   if (d.err) { onFaultsData({ u: ENG, err: d.err }); return; }

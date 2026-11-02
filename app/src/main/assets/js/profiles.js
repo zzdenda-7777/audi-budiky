@@ -7,11 +7,11 @@
    for the BDG (V6) VW publishes no target values online, so those are estimates, and the tests compare
    with what the engine unit itself requests, which does not depend on them. */
 const PROFILES = {
-  a4v6: { id: 'a4v6', say: 'Áčtyřka', name: 'Audi A4 B6 2.5 TDI V6 (2003)', short: 'A4 2.5 TDI', engine: 'BDG · 120 kW · 310 Nm · VP44 · manuál 6 st. · přední pohon', cyl: 6, kw: 120, nm: 310, mass: 1570,
+  a4v6: { id: 'a4v6', say: 'Áčtyřka', name: 'Audi A4 B6 2.5 TDI V6 (2003)', short: 'A4 2.5 TDI', engine: 'BDG · 120 kW · 310 Nm · VP44 · manuál 6 st. · přední pohon', cyl: 6, kw: 120, nm: 310, mass: 1570, consTyp: 7.2,
     gear: 'manual', smooth: [1.5, 2.5], mafMin: [800, 750], mafNote: 'orientačně – pro BDG VW hodnotu nezveřejňuje', mafIdle: null, idle: [700, 950],
     boost: [1900, 2300], boostAct: null, iqIdle: [2, 9], iqFull: [40, 48], acc0100: 8.9, pump: 'VP44', n75: [45, 95],
     src: { smooth: 'VW', acc0100: 'výrobce', kw: 'výrobce', iqIdle: 'VW (TDI obecně)', cool: 'VW' } },
-  a6r4: { id: 'a6r4', say: 'Ášestka', name: 'Audi A6 C5 1.9 TDI (1998)', short: 'A6 1.9 TDI', engine: 'AFN · 81 kW · 235 Nm · čerpadlo VE · manuál 5 st.', cyl: 4, kw: 81, nm: 235, mass: 1500,
+  a6r4: { id: 'a6r4', say: 'Ášestka', name: 'Audi A6 C5 1.9 TDI (1998)', short: 'A6 1.9 TDI', engine: 'AFN · 81 kW · 235 Nm · čerpadlo VE · manuál 5 st.', cyl: 4, kw: 81, nm: 235, mass: 1500, consTyp: 6.0,
     gear: 'manual', smooth: [2.0, 3.0], mafMin: [850, 800], mafNote: 'Hella 850–1050 mg, VW minimum 800 mg', mafIdle: [230, 450], idle: [840, 945],
     boost: [1900, 2000], boostAct: [1750, 2250], iqIdle: [2.2, 9], iqFull: [40, 45], acc0100: 12.6, pump: 'VE', n75: [45, 95],
     n108: [2, 98], soiFull: [6, 14], g149: [1.45, 1.90],
@@ -20,9 +20,12 @@ const PROFILES = {
      50 kW at 4000 rpm, fixed-geometry turbo BorgWarner KP35 without intercooler (boost about 0.5–1.0 bar),
      common rail Bosch EDC16C34 or Siemens SID80x. Torque 150 Nm as in the owner's papers (catalogues differ: 150–160 Nm). */
   p206: { id: 'p206', say: 'Dvěstěšestka', proto: 'obd', make: 'Peugeot', name: 'Peugeot 206 1.4 HDi eco 70 (2005)', short: '206 1.4 HDi',
-    engine: '8HZ (DV4TD) · 50 kW · 150 Nm · common rail · manuál 5 st. · Bluetooth OBD', cyl: 4, kw: 50, nm: 150, mass: 1060, tank: 50,
+    engine: '8HZ (DV4TD) · 50 kW · 150 Nm · common rail · manuál 5 st. · Bluetooth OBD', cyl: 4, kw: 50, nm: 150, mass: 1060, tank: 50, consTyp: 4.8,
     gear: 'manual', smooth: [2.0, 3.0], mafMin: [0, 0], mafNote: '', mafIdle: null, idle: [750, 900], boost: [0, 0], boostAct: null,
     boostMax: [0.5, 1.0], iqIdle: [2, 9], iqFull: [0, 0], acc0100: 13.1, pump: 'common rail', n75: [45, 95],
+    /* full-load injection (mg/stroke) by revs, from the torque curve (150 Nm at 1750, 50 kW at 4000): used with the
+       calculated load to estimate consumption, then corrected by fill-ups */
+    iqMax: [[750, 14], [1250, 22], [1750, 29], [2500, 29], [3250, 27], [4000, 24], [4750, 18]],
     src: { kw: 'výrobce', acc0100: 'katalog' } }
 };
 /* Full limit table for the car page, grouped, most important first. Each item: [label, value, source].
@@ -50,9 +53,12 @@ function limitRows(){
       ['Napětí za chodu', '13,5–14,7 V (špatně < 13,0)', ''],
       ['Napětí v klidu', '12,4–12,8 V (špatně < 12,0)', '']
     ]],
-    ['Co OBD neumí', [
-      ['Vstřik, předvstřik, klidný chod', 'to hlásí jen diagnostika PSA, ne standardní OBD', ''],
-      ['Spotřeba', 'auto z roku 2005 ji přes OBD nehlásí', '']
+    ['Jak se to u Peugeotu měří', [
+      ['Spotřeba', 'odhad ze zatížení motoru a otáček, po tankování do plna se sám zpřesní (pokud auto hlásí spotřebu samo, bere se ta)', '-'],
+      ['Palivo v nádrži', 'počítá se od tankování – ručičku paliva řídí jiná jednotka, kam se adaptér OBD nedostane', '-'],
+      ['Klidný chod', 'test Volnoběh a klidný chod – podle kolísání otáček (korekce jednotlivých válců zná jen diagnostika PSA)', '-'],
+      ['Předvstřik', 'u common railu ho řídí jednotka sama; zobrazí se, jen když ho auto hlásí (PID 5D)', '-'],
+      ['Víc dat', 'Více → Hodnoty OBD → Průzkum jednotky: zjistí, co tvoje jednotka řekne navíc', '-']
     ]]
   ];
   const rows = [
@@ -152,7 +158,7 @@ const ST = {
   atm: x => x == null ? null : (x >= 950 && x <= 1050) ? ['ok', 'v pořádku'] : ['warn', 'zkontroluj snímač'],
   iq: x => { if (x == null || !idleNow() || !isWarm()) return null; return x <= PROFILE.iqIdle[1] ? ['ok', 'volnoběh v normě'] : x <= 12 ? ['warn', 'vyšší na volnoběh'] : ['bad', 'moc vysoký'] ; },
   rpm: x => { if (x == null || x >= 1100 || !isWarm()) return null; const [lo, hi] = PROFILE.idle; return (x >= lo && x <= hi) ? ['ok', 'volnoběh'] : ['warn', 'volnoběh mimo']; },
-  tim: x => { const s = fresh('timSpec'); if (x == null || s == null) return null; const d = Math.abs(x - s); return d <= 0.5 ? ['ok', 'přesně'] : d <= 1.0 ? ['warn', 'nepřesně'] : ['bad', 'mimo požadavek']; },
+  tim: x => { const s = fresh('timSpec'); if (isObd() || x == null || s == null) return null; const d = Math.abs(x - s); return d <= 0.5 ? ['ok', 'přesně'] : d <= 1.0 ? ['warn', 'nepřesně'] : ['bad', 'mimo požadavek']; },
   cool: x => x == null ? null : x < 70 ? ['info', 'zahřívá se'] : x < 80 ? ['info', 'skoro zahřátý'] : x <= 110 ? ['ok', 'v pořádku'] : x <= 115 ? ['warn', 'vysoká'] : ['bad', 'přehřívá'],
   fuelT: x => x == null ? null : x <= 80 ? ['ok', 'v pořádku'] : x <= 90 ? ['warn', 'teplé'] : ['bad', 'horké'],
   iat: x => x == null ? null : x <= 50 ? ['ok', 'v pořádku'] : x <= 70 ? ['warn', 'teplý vzduch'] : ['bad', 'horký vzduch'],
@@ -200,7 +206,7 @@ const VINFO = {
   iq: { co: 'Množství nafty na jeden zdvih (mg).', norm: () => 'Zahřátý volnoběh bez spotřebičů ' + fmt(P().iqIdle[0], 1) + '–' + P().iqIdle[1] + ' mg (VW). Plný plyn ' + P().iqFull[0] + '–' + P().iqFull[1] + ' mg' + (P().src && P().src.iqFull ? ' (VW, 3000 ot.)' : ' (orientačně)') + '.', bad: 'Volnoběh přes 12 mg.', fix: 'Velké vnitřní tření, zapnuté spotřebiče, opotřebené vstřikovače.' },
   pwr: { co: 'Odhad výkonu z množství nafty a otáček (počítá aplikace, účinnost asi 36 %).', norm: () => 'Výrobce: ' + P().kw + ' kW / ' + Math.round(P().kw * 1.36) + ' k. Přesněji změříš v Testy → Virtuální dyno.', bad: 'Pod 75 % výrobce při plném plynu.', fix: 'Nejdřív zkontroluj turbo a MAF.' },
   tq: { co: 'Odhad točivého momentu z množství nafty.', norm: () => 'Výrobce: ' + P().nm + ' Nm.', bad: 'Výrazně méně při plném plynu.', fix: 'Turbo, MAF, palivo.' },
-  tim: { co: 'Začátek vstřiku (předvstřik) – kdy čerpadlo vstřikuje, ve stupních před horní úvratí.', norm: () => 'Skutečný má sedět na požadovaný do ±0,5°.', bad: 'Odchylka přes 1,0°.', fix: (P().cyl === 6 ? 'Čerpadlo VP44 nebo snímač zdvihu jehly (válec 3).' : 'Opotřebené čerpadlo VE, ventil předvstřiku N108, nastavení čerpadla.') },
+  tim: { co: 'Začátek vstřiku (předvstřik) – kdy čerpadlo vstřikuje, ve stupních před horní úvratí.', norm: () => isObd() ? 'U common railu řídí začátek vstřiku jednotka sama podle otáček a zatížení – je to jen informace.' : 'Skutečný má sedět na požadovaný do ±0,5°.', bad: 'Odchylka přes 1,0°.', fix: (P().cyl === 6 ? 'Čerpadlo VP44 nebo snímač zdvihu jehly (válec 3).' : 'Opotřebené čerpadlo VE, ventil předvstřiku N108, nastavení čerpadla.') },
   lim: { co: 'Požadovaný vstřik a dva limity (podle otáček a podle vzduchu).', norm: () => 'Když vstřik naráží na limit podle vzduchu, motoru chybí vzduch.', bad: 'Vstřik omezený vzduchem při plném plynu.', fix: 'MAF, turbo, sání.' },
   ped: { co: 'Sešlápnutí plynu v %.', norm: () => '0 % puštěný, 100 % na podlaze.', bad: 'Na podlaze ukazuje méně než 100 %.', fix: 'Snímač pedálu, koberec pod pedálem.' },
   cool: { co: 'Teplota chladicí kapaliny.', norm: () => 'Zahřátý motor 80–110 °C (VW). Budík ukazuje 90 v širokém rozsahu.', bad: 'Přes 115 °C přehřívání. Pod 75 °C i po 20 minutách jízdy = vadný termostat.', fix: 'Přehřívání: hladina chladiva, ventilátor, čerpadlo vody. Studený motor: termostat.' },
@@ -209,12 +215,12 @@ const VINFO = {
   outT: { co: 'Venkovní teplota z přístrojového panelu.', norm: () => 'Jen informace.', bad: '3 °C a méně – může klouzat.', fix: 'Jezdi opatrně.' },
   oilT: { co: 'Teplota oleje z přístrojového panelu (jen některé panely ji hlásí).', norm: () => 'Do 120 °C.', bad: 'Přes 135 °C.', fix: 'Zvol nižší zatížení, zkontroluj hladinu oleje.' },
   spd: { co: 'Rychlost podle GPS telefonu.', norm: () => 'Přesnost asi ±1 km/h při dobrém signálu.', bad: '–', fix: 'Bez signálu zapni polohu v telefonu.' },
-  cons: { co: 'Okamžitá spotřeba (odhad ze vstřiku a otáček). Při stání v l/h.', norm: () => 'Jen informace.', bad: '–', fix: '–' },
-  avg: { co: 'Průměrná spotřeba za tuto jízdu (odhad).', norm: () => P().short + ': běžně ' + (P().cyl === 6 ? '6,5–8,5' : '5–6,5') + ' l/100 km podle jízdy.', bad: 'Výrazně víc než tvůj obvyklý průměr (Cesta → Historie).', fix: 'Tlak v pneumatikách, termostat, MAF, styl jízdy.' },
+  cons: { get co(){ return isObd() ? (fuelSrc() === 'ecu' ? 'Okamžitá spotřeba, jak ji hlásí jednotka motoru. Při stání v l/h.' : 'Okamžitá spotřeba – odhad ze zatížení motoru a otáček (auto ji přes OBD nehlásí). Po tankování do plna se sama zpřesní. Při stání v l/h.') : 'Okamžitá spotřeba (odhad ze vstřiku a otáček). Při stání v l/h.'; }, norm: () => 'Jen informace.', bad: '–', fix: '–' },
+  avg: { co: 'Průměrná spotřeba za tuto jízdu (odhad).', norm: () => P().short + ': běžně ' + (P().proto === 'obd' ? '4–5,5' : P().cyl === 6 ? '6,5–8,5' : '5–6,5') + ' l/100 km podle jízdy.', bad: 'Výrazně víc než tvůj obvyklý průměr (Cesta → Historie).', fix: 'Tlak v pneumatikách, termostat, MAF, styl jízdy.' },
   cost: { co: 'Kolik stála nafta za tuto jízdu (odhad). Cenu nafty nastavíš ve Více → Nastavení.', norm: () => 'Jen informace.', bad: '–', fix: '–' },
   dist: { co: 'Ujeté kilometry této jízdy podle GPS.', norm: () => 'Jen informace.', bad: '–', fix: '–' },
-  range: { co: 'Odhad, kolik ujedeš s palivem v nádrži.', norm: () => 'Palivo z panelu při připojení mínus spotřeba od té doby.', bad: '–', fix: '–' },
-  fuelL: { co: 'Palivo v nádrži (odhad od načtení panelu).', norm: () => 'Jen informace.', bad: 'Pod 10 l brzy tankovat, pod 5 l rezerva.', fix: 'Natankuj. ' + (P().cyl === 6 ? 'S málem nafty se VP44 hůř chladí.' : '') },
+  range: { co: 'Odhad, kolik ujedeš s palivem v nádrži.', norm: () => isObd() ? 'Palivo od posledního tankování (Cesta → Natankoval jsem) mínus spotřeba od té doby, děleno průměrnou spotřebou.' : 'Palivo z panelu při připojení mínus spotřeba od té doby.', bad: '–', fix: '–' },
+  fuelL: { get co(){ return isObd() ? 'Palivo v nádrži. Motor stav nádrže nezná (ručičku řídí jiná jednotka, kam se adaptér OBD nedostane), proto se počítá od tankování: Cesta → Natankoval jsem.' : 'Palivo v nádrži (odhad od načtení panelu).'; }, norm: () => 'Jen informace.', bad: 'Pod 10 l brzy tankovat, pod 5 l rezerva.', fix: 'Natankuj. ' + (P().cyl === 6 ? 'S málem nafty se VP44 hůř chladí.' : '') },
   volt: { co: 'Napětí palubní sítě (z řídicí jednotky).', norm: () => 'Motor běží: 13,5–14,7 V. Motor stojí: 12,4–12,8 V.', bad: 'Pod 13,0 V za chodu = alternátor nenabíjí. Pod 12,0 V v klidu = vybitá baterie.', fix: 'Alternátor, regulátor, řemen, baterie, kostry.' },
   load: { co: 'Vypočtené zatížení motoru (%) – kolik z možného výkonu teď motor dává.', norm: () => 'Volnoběh zhruba 15–30 %, plný plyn 90–100 %.', bad: 'Na plný plyn výrazně pod 90 %.', fix: 'Jen informace, používá se k testům (plný plyn).' },
   rail: { co: 'Tlak paliva v railu (common rail).', norm: () => 'Volnoběh zhruba 250–350 bar, pod plynem roste až na 1350–1600 bar.', bad: 'Kolísá na volnoběhu nebo pod plynem nevyroste.', fix: 'Vysokotlaké čerpadlo, regulátor tlaku, palivový filtr, netěsné vstřikovače.' },

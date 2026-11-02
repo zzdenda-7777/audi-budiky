@@ -13,7 +13,8 @@
     car.t += dt;
     const c = car.t % 40;
     let rpm, speed, load;
-    if (c < 6) { rpm = 820; speed = 0; load = 0; }
+    if (car.idleUntil && car.t < car.idleUntil) { rpm = 820; speed = 0; load = 0; }
+    else if (c < 6) { rpm = 820; speed = 0; load = 0; }
     else if (c < 16) { const k = (c - 6) / 10; speed = 46.5 * k; rpm = 1200 + 1100 * ((k * 3) % 1); load = 0.45; }
     else if (c < 19) { speed = 46.5; rpm = 1500; load = 0.2; }
     else if (c < 26) { const k = (c - 19) / 7; rpm = 1500 + 2800 * k; speed = rpm / 1000 * 31; load = 1; }
@@ -115,6 +116,16 @@
   window.DemoBridge = {
     setMode(m){ const nm = m === 'obd' ? 'obd' : 'kw1281'; if (nm !== demoMode && running) this.disconnect(); demoMode = nm; },
     setBt(){}, btPermission(){ call('onBtPerm', true); }, obdInfo(){ return '{}'; },
+    _idle(sec){ car.idleUntil = car.t + (sec || 40); },
+    obdProbe(){
+      if (demoMode !== 'obd' || !running) return;
+      clearTimeout(oTimer); let p = 0;
+      const step = () => { if (!running) return; p += 16; call('onObdProbe', { p });
+        if (p < 256) { oTimer = setTimeout(step, 180); return; }
+        call('onObdProbe', { done: true, hits: [{ id: 0x01, d: '0C D0 5A 80 1F 40' }, { id: 0xA0, d: '12 34' }], refused: 16, noData: 238, info: [{ q: '0900', a: '49 00 01 54 00 00 00' }, { q: '0904', a: '0904: auto na tohle nemá odpověď (NO DATA)' }] });
+        obdLoop(); };
+      step();
+    },
     btDevices(){ return JSON.stringify({ perm: true, on: true, sel: LS.get('btAddr'), list: [{ n: 'OBDII', a: '00:1D:A5:68:98:8B', t: 'classic', obd: true, bonded: true }, { n: 'JBL Flip 5', a: '00:42:79:11:22:33', t: 'classic', obd: false, bonded: true }] }); },
     btScan(){ setTimeout(() => call('onBtFound', { n: 'IOS-Vlink', a: 'C4:00:AB:12:34:56', t: 'ble', obd: true, bonded: false }), 1500); setTimeout(() => call('onBtScanDone', ''), 3500); },
     obdTrace(){ return ['10:00:00.000  ===== OBD: prohlížeč (ukázka), adaptér OBDII (00:1D:A5:68:98:8B), typ classic', '10:00:00.900  → ATZ', '10:00:01.700  ← ATZ⏎⏎ELM327 v1.5  [800 ms]', '10:00:01.750  → ATE0', '10:00:01.800  ← OK  [40 ms]',

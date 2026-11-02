@@ -639,6 +639,57 @@ const TESTS = [
   },
 
 
+  /* ---------- idle over OBD (Peugeot): standard OBD has no per-cylinder data, but how steadily the unit holds idle
+     shows a weak injector, glow plug or air leak too. Limits are our estimate until checked on the car. ---------- */
+  { id: 'idleObd', name: 'Volnoběh a klidný chod', sayName: 'Volnoběh', obdOnly: true, ds: 'Jak klidně motor drží volnoběh – kolísání otáček prozradí slabý vstřikovač nebo přisávání vzduchu',
+    need: () => [], obdIds: () => ['rpm', 'load'],
+    steps: () => ['Zahřej motor aspoň na 70 °C (pár km jízdy).', 'Stůj na volnoběhu, nešlapej na plyn ani na spojku, vypni klimatizaci, světla a ventilátor topení.', 'Spusť test a 30 s nic nedělej.'],
+    live: () => [['Otáčky', fmt(fresh('rpm'), 0), ''], ['Zatížení', fmt(fresh('load'), 0), '%'], ['Voda', fmt(fresh('cool', 10000), 0), '°C']],
+    start(){ TST.d = { s: [], ld: [], last: 0, t0: clock(), idleMs: 0, tPrev: clock(), cool: null }; TST.st = 'run'; TST.msg = 'Měřím volnoběh 30 s…'; beep('timing', 'start', 0, 'Start'); },
+    tick(){
+      const d = TST.d, rpm = fresh('rpm', 1500), ld = fresh('load', 3000), sp = speed(), dt = clock() - d.tPrev; d.tPrev = clock();
+      const idle = rpm != null && rpm > 500 && rpm < 1150 && (sp == null || sp < 3) && !((fresh('ped', 2000) || 0) > 4);
+      if (idle) {
+        d.idleMs += dt;
+        if (isNew('rpm', d.last)) { d.last = M.rpm.t; d.s.push(rpm); if (ld != null) d.ld.push(ld); }
+      }
+      if (d.cool == null) d.cool = fresh('cool', 10000);
+      TST.msg = idle ? 'Měřím volnoběh… ' + Math.round(d.idleMs / 1000) + ' / 30 s, nic nedělej' : 'Čekám na volnoběh – nešlapej na plyn…';
+      d.prog = Math.min(1, d.idleMs / 30000);
+      if (d.prog >= 1) this.finish();
+      else if (clock() - d.t0 > 150000) { TST.st = 'ready'; TST.msg = 'Motor nebyl dost dlouho na volnoběhu. Zkus to znovu.'; }
+    },
+    finish(){
+      const d = TST.d, s = d.s;
+      if (s.length < 20) { TST.st = 'ready'; TST.msg = 'Málo měření otáček (' + s.length + '). Adaptér je pomalý nebo motor nebyl na volnoběhu – zkus to znovu.'; return; }
+      const mean = avg(s), sd = Math.sqrt(avg(s.map(x => (x - mean) * (x - mean))));
+      const sorted = s.slice().sort((a, b) => a - b), p5 = sorted[Math.floor(s.length * 0.05)], p95 = sorted[Math.floor(s.length * 0.95)], sw = p95 - p5;
+      const ldm = d.ld.length ? median(d.ld) : null, il = PROFILE.idle || [750, 900], cold = d.cool != null && d.cool < 65;
+      const bad = [], mid = [];
+      if (sd > 35) bad.push('otáčky kolísají o ±' + fmt(sd, 0)); else if (sd > 20) mid.push('otáčky trochu kolísají (±' + fmt(sd, 0) + ')');
+      if (mean < il[0] - 80 || mean > il[1] + 150) bad.push('volnoběh ' + fmt(mean, 0) + ' ot/min'); else if (mean < il[0] - 30 || mean > il[1] + 50) mid.push('volnoběh ' + fmt(mean, 0) + ' ot/min');
+      if (ldm != null && ldm > 40) mid.push('zatížení na volnoběhu ' + fmt(ldm, 0) + ' %');
+      const v = bad.length ? 'bad' : mid.length ? 'mid' : 'ok';
+      const head = v === 'ok' ? 'Motor drží volnoběh klidně – ' + fmt(mean, 0) + ' ot/min, kolísání jen ±' + fmt(sd, 0) + '.'
+        : (v === 'mid' ? 'Skoro v pořádku, ale ' : 'Volnoběh není klidný: ') + bad.concat(mid).join('; ') + '.';
+      const why = 'Standardní OBD neukáže korekce jednotlivých válců (to umí jen diagnostika PSA), ale jednotka drží volnoběh regulací: když jeden válec dává míň (slabý nebo netěsný vstřikovač, slabá komprese, přisávání vzduchu), otáčky začnou kolísat a regulace to nestíhá vyrovnat. ' +
+        'Zdravý common rail drží volnoběh zhruba na ±10–15 ot/min.' + (cold ? ' Motor byl při měření studený (' + fmt(d.cool, 0) + ' °C) – studený diesel kolísá víc, test zopakuj zahřátý.' : '') + ' Hranice jsou zatím orientační, doladí se podle rozboru z tvého auta.';
+      const todo = v === 'ok' ? ['Nic, volnoběh je v pořádku.', 'Test zopakuj jednou za čas, ať vidíš, jestli se něco nemění.']
+        : ['Test zopakuj na zahřátém motoru s vypnutými spotřebiči.', 'Načti chybové kódy – hledej kódy vstřikovačů (P0201–P0204), tlaku v railu (P0087, P0093) a snímače vačky.',
+           'Když se motor při volnoběhu třese, nech v servisu změřit přepad vstřikovačů (zpětný průtok) – to je u 1.4 HDi nejčastější příčina.', 'Zkontroluj hadice sání a podtlakové hadičky, jestli někde nepřisává.'];
+      TST.res = { v, why, head, todo, rows: [['Volnoběh', fmt(mean, 0) + ' ot/min'], ['Kolísání', '±' + fmt(sd, 0) + ' ot/min'], ['Rozptyl 5–95 %', fmt(sw, 0) + ' ot/min'], ['Zatížení', ldm != null ? fmt(ldm, 0) + ' %' : '–'], ['Voda', d.cool != null ? fmt(d.cool, 0) + ' °C' : '–'], ['Měření', s.length + '×']],
+        sum: fmt(mean, 0) + ' ot/min ±' + fmt(sd, 0) };
+      TST.res.num = { mean, sd, sw, load: ldm };
+      const m = [
+        { n: 'Kolísání otáček', val: '±' + fmt(sd, 0) + ' ot/min', norm: 'do ±20 (orientačně)', s: sc(sd, [[0, 100], [8, 100], [15, 85], [20, 70], [35, 45], [60, 15]]), w: 3 },
+        { n: 'Volnoběžné otáčky', val: fmt(mean, 0) + ' ot/min', norm: il[0] + '–' + il[1] + ' (orientačně)', s: sc(mean, [[il[0] - 150, 20], [il[0] - 30, 70], [(il[0] + il[1]) / 2, 100], [il[1] + 50, 70], [il[1] + 200, 25]]), w: 1 }
+      ];
+      if (ldm != null) m.push({ n: 'Zatížení na volnoběhu', val: fmt(ldm, 0) + ' %', norm: 'do 40 % (orientačně)', s: sc(ldm, [[10, 100], [30, 95], [40, 70], [55, 40]]), w: 1 });
+      finishGrade(TST.res, m);
+      testDone('idleObd');
+    }
+  },
+
   /* ---------- turbo over OBD (Peugeot 206 1.4 HDi, fixed-geometry KP35 without intercooler) ----------
      OBD reports only the actual manifold pressure (PID 0B), not what the unit asks for, so the result is compared
      with the engine's typical boost (about 0.5–1.0 bar). Marked as an estimate until checked on the car. */
@@ -953,7 +1004,7 @@ const TESTS = [
 ];
 const TESTBY = {}; TESTS.forEach(t => TESTBY[t.id] = t);
 /* list order: on the spot first, then the ones that need a drive */
-const TEST_GROUPS = [['Na místě', ['pump', 'smooth', 'cold', 'egr', 'batt', 'ctemp']], ['Za jízdy', ['turbo', 'turboObd', 'maf', 'wheels', 'clutch', 'thermo', 'dyno', 'acc']]];
+const TEST_GROUPS = [['Na místě', ['pump', 'smooth', 'idleObd', 'cold', 'egr', 'batt', 'ctemp']], ['Za jízdy', ['turbo', 'turboObd', 'maf', 'wheels', 'clutch', 'thermo', 'dyno', 'acc']]];
 const testFits = t => isObd() ? !!(t.obd || t.obdOnly) : !t.obdOnly;
 
 /* ---------- rendering ---------- */

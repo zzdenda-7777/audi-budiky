@@ -14,9 +14,18 @@ const PAGES_DEF = [
 const PAGES_DEF_OBD = [
   { name: 'Stav', layout: 'health', vals: [] },
   { name: 'Turbo', layout: 'dial', vals: ['boost', 'rpm', 'load', 'mafGs', 'rail'] },
-  { name: 'Jízda', layout: 'grid', vals: ['spd', 'rpm', 'load', 'dist', 'cool', 'volt'] },
-  { name: 'Teploty', layout: 'grid', vals: ['cool', 'iat', 'outT', 'volt', 'rpm', 'fuelL'] }
+  { name: 'Jízda', layout: 'grid', vals: ['spd', 'cons', 'avg', 'fuelL', 'dist', 'cost'] },
+  { name: 'Teploty', layout: 'grid', vals: ['cool', 'iat', 'outT', 'oilT', 'volt', 'rpm'] }
 ];
+/* Over OBD every car supports something else: once the unit said what it has, a value it doesn't have
+   is swapped for one it does (in this order) instead of showing "není". The saved page stays as it was. */
+const OBD_FILL = ['cons', 'spd', 'rpm', 'load', 'cool', 'iat', 'volt', 'mafGs', 'boost', 'ped', 'fuelL', 'avg', 'dist', 'cost', 'tim', 'rail', 'rate'];
+function effVals(p){
+  if (!p || p.layout === 'health' || !isObd() || !OBD.sup.size) return p ? p.vals : [];
+  const out = p.vals.filter(id => VALBY[id] && valAvailable(VALBY[id]));
+  for (const id of OBD_FILL) { if (out.length >= p.vals.length) break; if (!out.includes(id) && valAvailable(VALBY[id])) out.push(id); }
+  return out;
+}
 const pagesDef = () => isObd() ? PAGES_DEF_OBD : PAGES_DEF;
 const pagesKey = () => isObd() ? 'pages.obd' : 'pages';
 function validPages(p){
@@ -71,12 +80,14 @@ function buildPage(){
   if (p.layout === 'health') {
     html = '<div class="hnote" id="hNote" hidden></div>' + HEALTH_ROWS.filter(healthFits).map(r => '<div class="hrow" role="button" data-h="' + r.id + '"><span class="hdot"></span><div class="htx"><div class="hl">' + r.name + '</div><div class="hs">–</div></div><div class="hv"></div></div>').join('');
   } else if (p.layout === 'dial') {
-    html = '<div class="dialcard" role="button" data-id="' + p.vals[0] + '">' + (IS_DEMO ? '<span class="demo">UKÁZKA · smyšlená data</span>' : '') + '<canvas></canvas></div>' +
-      '<div class="quad">' + p.vals.slice(1).map(id => tileHTML(id)).join('') + '</div>';
+    const vals = effVals(p);
+    html = '<div class="dialcard" role="button" data-id="' + vals[0] + '">' + (IS_DEMO ? '<span class="demo">UKÁZKA · smyšlená data</span>' : '') + '<canvas></canvas></div>' +
+      '<div class="quad">' + vals.slice(1).map(id => tileHTML(id)).join('') + '</div>';
   } else if (p.layout === 'big') {
-    html = tileHTML(p.vals[0], true) + (p.vals.length > 1 ? '<div class="duo">' + p.vals.slice(1).map(id => tileHTML(id)).join('') + '</div>' : '');
+    const vals = effVals(p);
+    html = tileHTML(vals[0], true) + (vals.length > 1 ? '<div class="duo">' + vals.slice(1).map(id => tileHTML(id)).join('') + '</div>' : '');
   } else {
-    html = p.vals.map(id => tileHTML(id)).join('');
+    html = effVals(p).map(id => tileHTML(id)).join('');
   }
   body.innerHTML = html;
   D.slots = [];
@@ -277,7 +288,7 @@ function drawSpark(cv, hist, v){
 
 /* ---------- HUD (mirrored for the windscreen) ---------- */
 function openHud(){
-  const vals = PAGES[curPage].vals.length ? PAGES[curPage].vals.slice(0, 3) : ['boost', 'rpm', 'cool'];
+  const pv = effVals(PAGES[curPage]), vals = pv.length ? pv.slice(0, 3) : ['boost', 'rpm', 'cool'];
   D.hud = { vals, txt: {} };
   const o = $('hud');
   o.innerHTML = '<div class="mir">' + vals.map(id => '<div class="row" data-id="' + id + '"><span class="l">' + esc(VALBY[id].name) + '</span><span class="v"><b>–</b><small>' + esc(VALBY[id].unit) + '</small></span></div>').join('') + '</div>' +

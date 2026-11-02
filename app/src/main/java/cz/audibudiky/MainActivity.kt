@@ -70,6 +70,8 @@ class MainActivity : Activity() {
     @Volatile private var clusterBaud = 0
     @Volatile private var engineBaud = 10400
     @Volatile private var faultsReq = 0
+    /** One-off read-only survey of the OBD engine unit (mode 09 + KWP 21xx), asked for from the OBD values page. */
+    @Volatile private var probeReq = false
     /** One-off read of another unit (e.g. ABS = 0x03): its address, groups and how long. */
     private data class UnitReq(val address: Int, val groups: IntArray, val seconds: Int)
     @Volatile private var unitReq: UnitReq? = null
@@ -83,10 +85,16 @@ class MainActivity : Activity() {
     @Volatile private var btName = ""
     @Volatile private var obdInfo = JSONObject()
     private val obdBuf = ArrayDeque<String>()
+    /** The first lines since the app started (adapter setup, protocol search, supported values) – never pushed out by live data. */
+    private val obdHead = ArrayList<String>()
+    @Volatile private var obdCut = 0
     /** Every ELM command and raw answer, kept for the report (Více → O aplikaci → Rozbor). */
     private fun otrace(msg: String) {
         val line = tsFmt.format(Date()) + "  " + msg
-        synchronized(obdBuf) { obdBuf.addLast(line); while (obdBuf.size > 2500) obdBuf.removeFirst() }
+        synchronized(obdBuf) {
+            if (obdHead.size < 700) obdHead.add(line)
+            else { obdBuf.addLast(line); while (obdBuf.size > 4000) { obdBuf.removeFirst(); obdCut++ } }
+        }
         trace(msg)
     }
     private val prefs get() = getSharedPreferences("ab", 0)
@@ -357,10 +365,15 @@ class MainActivity : Activity() {
         fun btPermission() { main.post { askBtPermission() } }
 
         @JavascriptInterface
-        fun obdTrace(): String = synchronized(obdBuf) { obdBuf.joinToString("\n") }
+        fun obdTrace(): String = synchronized(obdBuf) {
+            obdHead.joinToString("\n") + (if (obdBuf.isEmpty()) "" else "\n" + (if (obdCut > 0) "… (vynecháno $obdCut řádků živých dat) …\n" else "") + obdBuf.joinToString("\n"))
+        }
 
         @JavascriptInterface
         fun obdInfo(): String = obdInfo.toString()
+
+        @JavascriptInterface
+        fun obdProbe() { probeReq = true }
 
         /** Reads measuring groups of another unit for a few seconds, then goes back to the engine. Read-only. */
         @JavascriptInterface
@@ -904,6 +917,20 @@ class MainActivity : Activity() {
                                 js("onObdFaults", JSONObject().put("mil", mil).put("n", n).put("stored", JSONArray(st.map { it.code })).put("pending", JSONArray(pe.map { it.code })).toString())
                             } catch (e: Exception) {
                                 js("onObdFaults", JSONObject().put("err", e.message ?: "?").toString())
+                                if (e !is ElmError) throw e
+                            }
+                            status("Živě", "live")
+                        }
+                        if (probeReq) {
+                            probeReq = false
+                            status("Průzkum jednotky (jen čtení, asi minuta)…", "faults")
+                            try {
+                                val r = elm.probeLocal { n -> js("onObdProbe", JSONObject().put("p", n).toString()) }
+                                val hits = JSONArray(); r.hits.forEach { hits.put(JSONObject().put("id", it.id).put("d", it.data)) }
+                                val info = JSONArray(); r.info.forEach { info.put(JSONObject().put("q", it.first).put("a", it.second)) }
+                                js("onObdProbe", JSONObject().put("done", true).put("hits", hits).put("refused", r.refused).put("noData", r.noData).put("info", info).toString())
+                            } catch (e: Exception) {
+                                js("onObdProbe", JSONObject().put("done", true).put("err", e.message ?: "?").toString())
                                 if (e !is ElmError) throw e
                             }
                             status("Živě", "live")

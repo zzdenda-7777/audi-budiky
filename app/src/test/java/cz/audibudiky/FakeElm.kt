@@ -99,7 +99,24 @@ class FakeElm(
         "03" -> dtcAnswer(0x43, stored)
         "07" -> dtcAnswer(0x47, pending)
         "0902" -> if (vin.isEmpty()) "NO DATA" else vinAnswer()
-        else -> "NO DATA"
+        "0900" -> fmt("49000154000000")
+        "0904" -> "NO DATA"
+        "015D" -> fmt("415D6B80")           // (0x6B80/128) - 210 = 5.0 °
+        "015E" -> fmt("415E0014")           // 20/20 = 1.0 l/h
+        else -> psaAnswer(c)
+    }
+
+    /** PSA engine unit: a few KWP2000 ReadDataByLocalIdentifier answers, the rest refused or silent. */
+    private fun psaAnswer(c: String): String {
+        if (c.length != 4 || !c.startsWith("21")) return "NO DATA"
+        val id = c.substring(2).toInt(16)
+        return when {
+            id == 0x01 -> fmt("6101" + "0CD0" + "5A" + "80" + "1F40")
+            id == 0xA0 -> fmt("61A0" + "1234")
+            id == 0xFE -> fmt("61FE" + "0128000002")
+            id in 0x80..0x8F -> fmt("7F2112")
+            else -> "NO DATA"
+        }
     }
 
     private fun enc(code: String): String {

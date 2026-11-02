@@ -72,6 +72,7 @@ function renderMore(){
     MENU.find(m => m[0] === 'groups')[1] = o ? 'Hodnoty OBD' : 'Surové skupiny';
     MENU.find(m => m[0] === 'groups')[2] = o ? 'Co všechno auto hlásí (pro pokročilé)' : 'Všechny hodnoty z jednotky (pro pokročilé)';
     MENU.find(m => m[0] === 'about')[2] = o ? 'Verze, telefon, adaptér, rozbor' : 'Verze, telefon, kabel, rozbor';
+    MENU.find(m => m[0] === 'settings')[2] = o ? 'Auto, cena nafty, GPS, adaptér' : 'Auto, cena nafty, GPS, panel';
     body.innerHTML = '<div class="list">' + MENU.map(m => {
       const badge = m[0] === 'log' && unseenLog() ? '<span class="badge">' + unseenLog() + '</span>' : '';
       return '<button class="item" data-m="' + m[0] + '"><div class="tx"><div class="tt">' + m[1] + '</div><div class="ds">' + m[2] + '</div></div>' + badge + '<span class="chev">' + ICON.chev + '</span></button>';
@@ -203,13 +204,13 @@ function renderSettings(){
     togRow('sNightDim', 'V noci ztlumit displej', 'aby tě displej neoslňoval', CFG.nightDim) +
     '<p class="note" style="margin:6px 0 0">' + esc(sunText()) + '</p></div>' +
     '<div class="lbl2">Auto</div><div class="card">' +
-    numRow('sMass', 'Hmotnost s řidičem', 'kg – ' + esc(PROFILE.short) + ', pro virtuální dyno', carMass(), 10) +
+    (isObd() ? '' : numRow('sMass', 'Hmotnost s řidičem', 'kg – ' + esc(PROFILE.short) + ', pro virtuální dyno', carMass(), 10)) +
     numRow('sPrice', 'Cena nafty', 'Kč za litr – pro cenu jízdy', CFG.price, 0.1) +
     numRow('sShift', 'Pípnout na řazení', 'ot/min', CFG.shiftRpm, 100) + '</div>' +
     '<div class="lbl2">Připojení</div><div class="card">' +
     (isObd() ? '<div class="switch"><span class="sw-t">Adaptér OBD<small>' + esc(CFG.btName ? CFG.btName + ' · ' + CFG.btAddr : 'nevybraný') + '</small></span><button class="btn small" id="sBt">Změnit</button></div>'
       : togRow('sClu', 'Číst panel při připojení', 'palivo, km, venkovní teplota – jen jednou, pak už běží jen motor', CFG.cluster)) +
-    togRow('sGps', 'GPS', 'rychlost, km, l/100 km, zrychlení, dyno', CFG.gps) +
+    togRow('sGps', 'GPS', isObd() ? 'rychlost, km, l/100 km, zrychlení' : 'rychlost, km, l/100 km, zrychlení, dyno', CFG.gps) +
     togRow('sRec', 'Nahrávat jízdu automaticky', 'CSV do Stažených souborů', CFG.autoRec) + '</div>' +
     '<div class="lbl2">Data</div><div class="card"><p>Historie (jízdy, testy, poslední hodnoty) je uložená v telefonu a přežije restart i aktualizaci aplikace.</p>' +
     '<button class="btn ghost wide" id="sDelAll">' + (Date.now() - delAllArm < 4000 ? 'Opravdu smazat celou historii?' : 'Smazat celou historii') + '</button></div>';
@@ -217,7 +218,7 @@ function renderSettings(){
   $('sNightAuto').onclick = () => { CFG.nightAuto = !CFG.nightAuto; saveCfg(); themeTick(); renderSettings(); };
   $('sNightDim').onclick = () => { CFG.nightDim = !CFG.nightDim; saveCfg(); themeTick(); renderSettings(); };
   const num = (id, key, min, max) => { $(id).onchange = e => { const v = parseFloat(String(e.target.value).replace(',', '.')); if (isFinite(v) && v >= min && v <= max) { CFG[key] = v; saveCfg(); } else e.target.value = CFG[key]; }; };
-  $('sMass').onchange = e => { const v = parseFloat(String(e.target.value).replace(',', '.')); if (isFinite(v) && v >= 500 && v <= 4000) { CFG.massBy = CFG.massBy || {}; CFG.massBy[PROFILE.id] = v; saveCfg(); } else e.target.value = carMass(); }; num('sPrice', 'price', 1, 200); num('sShift', 'shiftRpm', 1500, 6000);
+  if ($('sMass')) $('sMass').onchange = e => { const v = parseFloat(String(e.target.value).replace(',', '.')); if (isFinite(v) && v >= 500 && v <= 4000) { CFG.massBy = CFG.massBy || {}; CFG.massBy[PROFILE.id] = v; saveCfg(); } else e.target.value = carMass(); }; num('sPrice', 'price', 1, 200); num('sShift', 'shiftRpm', 1500, 6000);
   if ($('sClu')) $('sClu').onclick = () => { CFG.cluster = !CFG.cluster; saveCfg(); A && A.setClusterOnConnect && A.setClusterOnConnect(CFG.cluster); renderSettings(); };
   if ($('sBt')) $('sBt').onclick = openBtPicker;
   $('sGps').onclick = () => { CFG.gps = !CFG.gps; saveCfg(); if (A) { if (CFG.gps) A.gpsStart && A.gpsStart(); else { A.gpsStop && A.gpsStop(); S.gpsV = null; } } renderSettings(); };
@@ -252,6 +253,9 @@ const SND_WHEN = {
   conn: 'Po připojení k motoru, při výpadku spojení a když se zase naváže.',
   drive: 'Nafta pod nastavenou hodnotou. Náledí: venku 3 °C a méně. Dál: GPS připravena, start a uložení nahrávání, počet chyb po načtení.'
 };
+/* the Peugeot over OBD has no injection quantity (no smoke warning), no requested boost (no turbo warning), no fuel temperature */
+const sndCats = () => !isObd() ? SND_CATS : SND_CATS.filter(c => c[0] !== 'smoke' && c[0] !== 'turbo').map(c => c[0] === 'temp' ? [c[0], c[1], OBD.sup.has(0x5C) ? 'voda, olej' : 'voda'] : c);
+const sndLims = k => { const l = SND_LIMS[k]; if (!l || !isObd()) return l; return l.filter(x => x[0] !== 'fuelTWarn' && (x[0] !== 'oilWarn' || OBD.sup.has(0x5C))); };
 function limVal(key){ return key === 'shiftRpm' ? CFG.shiftRpm : CFG.lim[key]; }
 function limSet(key, v){ if (key === 'shiftRpm') CFG.shiftRpm = v; else CFG.lim[key] = v; }
 /* voice picker: which Czech voice, how fast and how high it speaks */
@@ -293,9 +297,9 @@ function renderSounds(){
     '<div class="lbl2">Jak upozorňovat</div><div class="seg" id="sndMode"><button data-m="voice">Hlasem</button><button data-m="beep">Pípnutím</button></div>' +
     '<p class="note" style="margin:8px 0 0">' + ttsLine + (CFG.voice ? '<br>Hlas mluví jako navigace – když hraje rádio přes Bluetooth, ztiší ho a promluví do reproduktorů auta.' : '') + '</p>' +
     (CFG.voice && (ts === 2 || ts === 3) ? '<button class="btn small" id="ttsSet" style="margin-top:8px">Nastavení předčítání v telefonu</button>' : '') + '</div>' + voiceCardHTML(ts) +
-    '<div class="card">' + SND_CATS.map(c => '<div class="switch"><span class="sw-t">' + c[1] + '<small>' + (CFG.voice ? '„' + esc(SND_SAY[c[0]]) + '“' : c[2]) + '</small></span><button class="ibtn" data-try="' + c[0] + '" aria-label="Přehrát">' + ICON.sound + '</button><button class="tog' + (CFG.snd[c[0]] ? ' on' : '') + '" data-snd="' + c[0] + '" aria-label="' + c[1] + '"></button></div>' +
+    '<div class="card">' + sndCats().map(c => '<div class="switch"><span class="sw-t">' + c[1] + '<small>' + (CFG.voice ? '„' + esc(SND_SAY[c[0]]) + '“' : c[2]) + '</small></span><button class="ibtn" data-try="' + c[0] + '" aria-label="Přehrát">' + ICON.sound + '</button><button class="tog' + (CFG.snd[c[0]] ? ' on' : '') + '" data-snd="' + c[0] + '" aria-label="' + c[1] + '"></button></div>' +
       (SND_WHEN[c[0]] ? '<div class="sndwhen"><b>Kdy:</b> ' + esc(SND_WHEN[c[0]]) + '</div>' : '') +
-      ((CFG.snd[c[0]] && SND_LIMS[c[0]]) ? SND_LIMS[c[0]].map(l => '<div class="switch" style="padding-left:12px"><span class="sw-t" style="color:var(--muted)">' + l[1] + '</span><input class="num-in" id="lim_' + l[0] + '" type="number" inputmode="decimal" step="' + l[3] + '" value="' + fmt(limVal(l[0]), l[3] < 1 ? 1 : 0).replace(',', '.') + '"><span style="color:var(--muted);font-size:13px;width:3em">' + l[2] + '</span></div>').join('') : '')).join('') +
+      ((CFG.snd[c[0]] && sndLims(c[0])) ? sndLims(c[0]).map(l => '<div class="switch" style="padding-left:12px"><span class="sw-t" style="color:var(--muted)">' + l[1] + '</span><input class="num-in" id="lim_' + l[0] + '" type="number" inputmode="decimal" step="' + l[3] + '" value="' + fmt(limVal(l[0]), l[3] < 1 ? 1 : 0).replace(',', '.') + '"><span style="color:var(--muted);font-size:13px;width:3em">' + l[2] + '</span></div>').join('') : '')).join('') +
     '</div><p class="note" style="margin-top:10px">Hlasitost řídí hlasitost médií v telefonu. U upozornění, co mají pod sebou číslo, si nastavíš, při jaké hodnotě se ozvou. Varování hlasem se opakují nejvýš jednou za 30 s, aby se v autě pořád nemluvilo.</p>';
   $('sndAll').onclick = () => { CFG.sound = !CFG.sound; saveCfg(); renderSounds(); };
   $('sndMode').querySelectorAll('button').forEach(b => { b.classList.toggle('on', (b.dataset.m === 'voice') === !!CFG.voice); b.onclick = () => { CFG.voice = b.dataset.m === 'voice'; saveCfg(); renderSounds(); }; });
@@ -318,7 +322,38 @@ function groupsPlan(){
 }
 const OBD_NAMES = { 0x04: 'Zatížení', 0x05: 'Voda', 0x0B: 'Tlak v sání (abs.)', 0x0C: 'Otáčky', 0x0D: 'Rychlost', 0x0F: 'Nasávaný vzduch', 0x10: 'Vzduch MAF', 0x11: 'Klapka',
   0x1F: 'Doba od startu', 0x21: 'Ujeto s rozsvícenou kontrolkou', 0x23: 'Tlak v railu', 0x2C: 'EGR (požadavek)', 0x2D: 'EGR (odchylka)', 0x2F: 'Palivo v nádrži', 0x31: 'Ujeto od smazání chyb',
-  0x33: 'Atmosférický tlak', 0x42: 'Napětí (jednotka)', 0x46: 'Venkovní teplota', 0x49: 'Plynový pedál', 0x5C: 'Teplota oleje', 0x100: 'Napětí (adaptér)' };
+  0x33: 'Atmosférický tlak', 0x42: 'Napětí (jednotka)', 0x46: 'Venkovní teplota', 0x49: 'Plynový pedál', 0x5C: 'Teplota oleje', 0x100: 'Napětí (adaptér)',
+  0x0A: 'Tlak paliva', 0x1C: 'Norma OBD', 0x22: 'Tlak v railu (rel.)', 0x30: 'Zahřátí od smazání chyb', 0x43: 'Absolutní zatížení', 0x4D: 'Doba s kontrolkou', 0x4E: 'Doba od smazání chyb',
+  0x5A: 'Plyn (relativně)', 0x5D: 'Začátek vstřiku', 0x5E: 'Spotřeba (jednotka)', 0x61: 'Požadovaný moment', 0x62: 'Skutečný moment', 0x63: 'Referenční moment' };
+/* ---------- one-off survey of the Peugeot engine unit beyond standard OBD (read-only: mode 09 + KWP 21xx) ---------- */
+let PROBE = { on: false, p: 0 };
+const probeStored = () => KV.get('obd.probe', null);
+function obdProbeStart(){
+  if (S.state !== 'live') { showToast('Nejdřív se připoj k autu'); return; }
+  if (PROBE.on) return;
+  if (!A || !A.obdProbe) { showToast('Tahle verze průzkum neumí'); return; }
+  PROBE = { on: true, p: 0, t0: Date.now() }; A.obdProbe(); renderObdValues();
+}
+function obdProbeData(d){
+  if (!d) return;
+  if (!d.done) { PROBE.p = d.p || 0; }
+  else {
+    PROBE.on = false;
+    if (d.err) showToast('Průzkum: ' + d.err);
+    KV.set('obd.probe', Object.assign({ t: Date.now(), info: OBD.info ? { proto: OBD.info.proto, vin: OBD.info.vin } : null }, d));
+    if (!d.err) showToast('Průzkum hotový: jednotka odpověděla na ' + (d.hits || []).length + ' z 256 dotazů');
+  }
+  if (curView === 'more' && moreSub === 'groups') renderObdValues();
+}
+function probeCardHTML(){
+  const st = probeStored();
+  let h = '<div class="card"><h3>Průzkum jednotky <button class="btn small" id="oProbe"' + (PROBE.on || S.state !== 'live' ? ' disabled' : '') + '>' + (PROBE.on ? 'Běží…' : st ? 'Znovu' : 'Spustit') + '</button></h3>' +
+    '<p style="margin:0">Jednorázově se zeptá jednotky motoru na všechno, co umí říct navíc ke standardnímu OBD (identifikace a 256 datových bloků PSA). Jen čte – nic nezapisuje ani nemaže. Trvá asi minutu, živé hodnoty se mezitím zastaví.</p>' +
+    '<p class="note" style="margin:8px 0 0">Výsledek jde do rozboru. Podle něj se dá zjistit, jestli tvoje jednotka prozradí víc (vstřik, korekce válců, požadovaný tlak) – a pak se to do aplikace doplní.</p>';
+  if (PROBE.on) h += '<div class="progress" style="margin-top:10px"><i style="width:' + Math.round(PROBE.p / 256 * 100) + '%"></i></div>';
+  else if (st) h += '<p class="note" style="margin:8px 0 0">Naposledy ' + dateTxt(st.t) + ' ' + timeTxt(st.t) + ': ' + (st.err ? 'chyba – ' + esc(st.err) : 'odpovědi ' + (st.hits || []).length + ', odmítnuto ' + (st.refused || 0) + ', bez odpovědi ' + (st.noData || 0)) + '</p>';
+  return h + '</div>';
+}
 function renderObdValues(){
   const i = OBD.info || {}, sup = [...OBD.sup].sort((a, b) => a - b);
   const ks = Object.keys(OBD.last).map(Number).sort((a, b) => a - b);
@@ -326,8 +361,9 @@ function renderObdValues(){
     '<p class="note mono" style="margin:8px 0 0;word-break:break-word">Podporované PID: ' + (sup.length ? sup.map(p => p.toString(16).toUpperCase().padStart(2, '0')).join(' ') : 'zatím nevím') + '</p></div>' +
     '<div class="card"><table class="gtab">' + (ks.length ? ks.map(p => { const x = OBD.last[p], age = (Date.now() - x.t) / 1000;
       return '<tr><td>' + esc(OBD_NAMES[p] || ('PID ' + p.toString(16).toUpperCase())) + '</td><td class="v">' + (x.v != null ? fmt(x.v, Math.abs(x.v) < 100 ? 1 : 0) + ' <small>' + esc(x.u || '') + '</small>' : '–') + '</td><td class="r">' + (p === 0x100 ? 'ATRV' : p.toString(16).toUpperCase().padStart(2, '0')) + ' · ' + (age < 2 ? 'teď' : fmt(age, 0) + ' s') + '</td></tr>'; }).join('')
-      : '<tr><td>Zatím žádná data – připoj se k autu.</td></tr>') + '</table></div>' +
+      : '<tr><td>Zatím žádná data – připoj se k autu.</td></tr>') + '</table></div>' + probeCardHTML() +
     '<p class="note" style="margin-top:12px">Na téhle stránce se čtou všechny hodnoty, které auto podporuje (proto je to pomalejší). Celý záznam komunikace je v rozboru (O aplikaci).</p>';
+  if ($('oProbe')) $('oProbe').onclick = obdProbeStart;
 }
 function renderGroups(){
   if (isObd()) return renderObdValues();
@@ -409,6 +445,19 @@ function buildReport(){
     L.push('', '== HODNOTY OBD TEĎ ==');
     Object.keys(OBD.last).map(Number).sort((a, b) => a - b).forEach(p => { const x = OBD.last[p]; L.push((OBD_NAMES[p] || 'PID ' + p.toString(16)) + ' (' + (p === 0x100 ? 'ATRV' : p.toString(16).toUpperCase().padStart(2, '0')) + '): ' + (x.v != null ? fmt(x.v, 2) + ' ' + (x.u || '') : '–') + '  [' + (x.r || '') + '] ' + (x.ms != null ? x.ms + ' ms' : '')); });
   }
+  if (isObd()) {
+    const pr = probeStored();
+    L.push('', '== PRŮZKUM JEDNOTKY (09xx, 21xx) ' + (pr ? '(' + new Date(pr.t).toLocaleString('cs-CZ') + ')' : '(zatím neproběhl – Více → Hodnoty OBD → Průzkum jednotky)') + ' ==');
+    if (pr) {
+      (pr.info || []).forEach(x => L.push(x.q + ': ' + x.a));
+      if (pr.err) L.push('chyba: ' + pr.err);
+      L.push('odpovědi ' + (pr.hits || []).length + ', odmítnuto ' + (pr.refused || 0) + ', bez odpovědi ' + (pr.noData || 0));
+      (pr.hits || []).forEach(x => L.push('21 ' + (+x.id).toString(16).toUpperCase().padStart(2, '0') + ' → ' + x.d));
+    }
+    L.push('', '== NÁDRŽ A SPOTŘEBA ==', 'Spotřeba z: ' + (fuelSrc() || '–') + ', zpřesnění ×' + fmt(fuelK(), 3) + (c.fuelCal ? ' (' + c.fuelCal + '× do plna)' : ''),
+      'Spáleno s aplikací celkem ≈ ' + fmt(c.fuelUsed || 0, 1) + ' l, v nádrži ≈ ' + (fuelNow() != null ? fmt(fuelNow(), 1) + ' l' : 'neznámo'));
+    (c.fuelLog || []).forEach(x => L.push(new Date(x.t).toLocaleString('cs-CZ') + ': ' + ({ full: 'do plna', part: 'část', set: 'stav' })[x.mode] + ' ' + fmt(x.l, 1) + ' l, před tím ≈ ' + (x.before != null ? fmt(x.before, 1) : '?') + ' l, spáleno celkem ' + fmt(x.used, 1) + ' l, ×' + fmt(x.k, 3)));
+  }
   const sc0 = isObd() ? null : scanStored();
   if (!isObd()) L.push('', '== PRŮZKUM SKUPIN ' + (sc0 ? '(' + new Date(sc0.t).toLocaleString('cs-CZ') + ', nalezeno ' + sc0.found + ')' : '(zatím neproběhl)') + ' ==');
   if (sc0) Object.keys(sc0.groups).map(Number).sort((a, b) => a - b).forEach(g => { const f = sc0.groups[g];
@@ -429,7 +478,7 @@ function buildReport(){
   (HIST.trips || []).filter(t => t.car === CAR).slice(0, 5).forEach(t => L.push(new Date(t.start).toLocaleString('cs-CZ') + ': ' + fmt(t.km, 1) + ' km, ' + fmt(t.fuel, 2) + ' l, max voda ' + fmt(t.maxCool, 0) + ' °C, max palivo ' + fmt(t.maxFuelT, 0) + ' °C, napětí ' + fmt(t.voltAvg, 1) + ' V'));
   if (isObd()) {
     let tr = ''; try { tr = A && A.obdTrace ? A.obdTrace() : ''; } catch (_) {}
-    L.push('', '== KOMUNIKACE S ADAPTÉREM (posledních až 2500 řádků) ==', tr || 'prázdné');
+    L.push('', '== KOMUNIKACE S ADAPTÉREM (začátek spojení celý, pak posledních až 4000 řádků) ==', tr || 'prázdné');
   }
   return L.join('\n');
 }
@@ -485,7 +534,7 @@ function renderCar(){
     Object.values(PROFILES).map(p => '<button class="pcard' + (p.id === PROFILE.id ? ' on' : '') + '" data-p="' + p.id + '"><b>' + esc(p.name) + '</b><span>' + esc(p.engine) + '</span>' + (p.id === PROFILE.id ? '<em>vybráno</em>' : '') + '</button>').join('') +
     '<div class="lbl2" style="margin-top:14px">Hranice pro ' + esc(PROFILE.short) + '</div>' +
     limitRows().map(g => '<div class="lbl2" style="margin:12px 2px 4px;color:var(--faint)">' + esc(g[0]) + '</div><div class="card" style="margin-top:0">' +
-      g[1].map(r => '<div class="limrow"><span>' + esc(r[0]) + (r[2] ? ' <em class="src ok">✓ ' + esc(r[2]) + '</em>' : ' <em class="src">orientačně</em>') + '</span><b>' + esc(r[1]) + '</b></div>').join('') + '</div>').join('') +
+      g[1].map(r => '<div class="limrow"><span>' + esc(r[0]) + (r[2] === '-' ? '' : r[2] ? ' <em class="src ok">✓ ' + esc(r[2]) + '</em>' : ' <em class="src">orientačně</em>') + '</span><b>' + esc(r[1]) + '</b></div>').join('') + '</div>').join('') +
     '<p class="note" style="margin-top:10px">„✓ VW“ = hodnota z dílenské příručky VW, od Helly nebo výrobce. „Orientačně“ = odhad z praxe – VW pro tenhle motor číslo nezveřejňuje. Testy turba, vzduchu a čerpadla porovnávají hlavně s tím, co si žádá jednotka motoru, takže na odhadech nestojí. Co je v pořádku, pozor a špatně, má u sebe každá hodnota (podrž prst na hodnotě).</p>';
   $('moreBody').querySelectorAll('[data-p]').forEach(b => b.onclick = () => { setProfile(b.dataset.p); renderCar(); pushPlan(true); showToast(PROFILE.name); });
 }
@@ -542,6 +591,11 @@ function renderCheckObd(){
   else steps.push([lastKey === 'obd-car' ? 'bad' : busy ? 'run' : '', 'Auto odpovídá', lastKey === 'obd-car' ? 'Adaptér je připojený, ale auto neodpovídá. Zapni zapalování a zkontroluj, že adaptér drží v zásuvce.' : 'Hledání protokolu trvá až 20 s.', '']);
   if (live && rate) steps.push(['ok', 'Čtení hodnot', 'Data tečou živě.', fmt(rate, 1) + ' hodnot/s']);
   else steps.push([live ? 'run' : '', 'Čtení hodnot', live ? 'Čekám na první data…' : 'Po připojení auta.', '']);
+  if (live && OBD.sup.size) {
+    const fs = fuelSrc(), c = CAR && HIST.cars[CAR];
+    steps.push(['ok', 'Spotřeba', fs === 'ecu' ? 'Auto ji hlásí samo (PID 5E).' : 'Auto ji nehlásí – počítá se ze zatížení motoru' + (c && c.fuelCal ? ', zpřesněno tankováním.' : ', po tankování do plna se zpřesní.'), fs === 'ecu' ? 'z auta' : 'odhad']);
+    steps.push([fresh('fuelPct', 60000) != null || (c && c.tank) ? 'ok' : '', 'Palivo v nádrži', fresh('fuelPct', 60000) != null ? 'Auto hlásí plovák nádrže.' : c && c.tank ? 'Počítá se od tankování.' : 'Zadej tankování: Cesta → Natankoval jsem.', fuelNow() != null ? fmt(fuelNow(), 0) + ' l' : '']);
+  }
   if (gpsSpeed() != null) steps.push(['ok', 'GPS', 'Signál je.', S.gpsAcc != null ? '±' + fmt(S.gpsAcc, 0) + ' m' : '']);
   else steps.push([CFG.gps ? 'run' : '', 'GPS', CFG.gps ? esc(S.gpsState) : 'Vypnutá v Nastavení.', '']);
   const icon = st => st === 'ok' ? '✓' : st === 'bad' ? '✕' : st === 'run' ? '…' : '·';
