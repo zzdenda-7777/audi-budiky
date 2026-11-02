@@ -59,6 +59,16 @@ class Recorder(private val dir: File) {
         }
     }
 
+    /** One OBD-II value (Peugeot): written as "OBD-0C" with the value in the first field. */
+    fun writeObd(pid: Int, value: Double, unit: String) {
+        synchronized(lock) {
+            val w = writer ?: return
+            w.write(num((SystemClock.elapsedRealtime() - t0) / 1000.0, 3) + ";" + String.format(Locale.US, "OBD-%02X", pid) + ";" + num(value, 3) + ";" + unit + ";;;;;;;\n")
+            rows++
+            if (rows % 20 == 0) w.flush()
+        }
+    }
+
     fun stop(): File? {
         synchronized(lock) { return stopInternal() }
     }

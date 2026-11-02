@@ -1,7 +1,15 @@
 'use strict';
 /* Stránka Stav: one glance whether the car is fine – turbo, air, temperatures, voltage, fault codes. */
 
-const HS = { turbo: [], maf: [], mafAbs: [], afr: [], tSince: null, mSince: null };
+const HS = { turbo: [], maf: [], mafAbs: [], afr: [], tSince: null, mSince: null, obdB: [] };
+/* OBD (Peugeot): only the actual boost is reported, so full-load boost is collected and compared with the engine's norm */
+function healthObd(){
+  const t = clock(), b = boostRel(), rpm = fresh('rpm', 2500);
+  if (b != null && rpm != null && rpm > 2000 && fullLoad()) HS.obdB.push({ t, v: b });
+  while (HS.obdB.length && (HS.obdB[0].t < t - 300000 || HS.obdB[0].t > t)) HS.obdB.shift();
+}
+/* which rows make sense for the car (OBD has no smooth-running or MAF target) */
+const healthFits = r => isObd() ? !r.vagOnly : !r.obdOnly;
 /* Only steady full load counts: the first 1.5 s after the request rises (turbo spooling) is skipped. */
 function healthIngest(e, g){
   if (e !== ENG) return;
@@ -25,7 +33,15 @@ const pct = (arr, p) => { if (!arr.length) return null; const a = arr.slice().so
 
 const worse = (a, b) => { const r = { '': 0, info: 0, ok: 1, warn: 2, bad: 3 }; return (r[b] || 0) > (r[a] || 0) ? b : a; };
 const HEALTH_ROWS = [
-  { id: 'turbo', name: 'Turbo', eval(){
+  { id: 'turboObd', name: 'Turbo', obdOnly: true, eval(){
+      const d = HS.obdB.map(x => x.v), bm = PROFILE.boostMax || [0.5, 1.0];
+      if (d.length < 4) return ['', 'Čeká na plný plyn', boostRel() != null ? 'teď ' + fmt(boostRel(), 2) + ' bar' : ''];
+      const mx = pct(d, 0.9), info = 'max ' + fmt(mx, 2) + ' bar\nnorma ' + fmt(bm[0], 1) + '–' + fmt(bm[1], 1) + ' bar (orientačně)';
+      if (mx < bm[0] - 0.15) return ['bad', 'Málo tlaku', info];
+      if (mx < bm[0] || mx > bm[1] + 0.3) return ['warn', mx < bm[0] ? 'Trochu málo tlaku' : 'Vysoký tlak', info];
+      return ['ok', 'Fouká', info];
+    } },
+  { id: 'turbo', name: 'Turbo', vagOnly: true, eval(){
       const d = HS.turbo.map(x => x.v);
       if (d.length < 5) return ['', 'Čeká na plný plyn', boostRel() != null ? 'teď ' + fmt(boostRel(), 2) + ' bar' : ''];
       const med = pct(d, 0.5), lo = pct(d, 0.1), a = Math.abs(med), info = 'odchylka ' + (med >= 0 ? '+' : '') + fmt(med, 2) + ' bar\nnorma ±0,10 bar';
@@ -33,7 +49,7 @@ const HEALTH_ROWS = [
       if (a > 0.10 || lo < -0.20) return ['warn', 'Drží přibližně', info];
       return ['ok', 'Drží tlak', info];
     } },
-  { id: 'maf', name: 'Vzduch (MAF)', eval(){
+  { id: 'maf', name: 'Vzduch (MAF)', vagOnly: true, eval(){
       const r = HS.maf.map(x => x.v), abs = HS.mafAbs.map(x => x.v), P = PROFILE;
       if (r.length < 4) return ['', 'Čeká na plný plyn', fresh('maf') != null ? 'teď ' + fmt(fresh('maf'), 0) + ' mg' : ''];
       const m = pct(r, 0.5); let lvl = m >= 0.93 ? 'ok' : m >= 0.85 ? 'warn' : 'bad';
@@ -56,7 +72,7 @@ const HEALTH_ROWS = [
       const st = statusOf('volt', v) || ['', '–'];
       return [st[0], st[1].charAt(0).toUpperCase() + st[1].slice(1), fmt(v, 1) + ' V\n' + (engineRuns() ? 'norma 13,5–14,7 V' : 'norma 12,4–12,8 V')];
     } },
-  { id: 'smooth', name: 'Klidný chod válců', eval(){
+  { id: 'smooth', name: 'Klidný chod válců', vagOnly: true, eval(){
       const r = lastTest('smooth');
       if (!r) return ['', 'Neměřeno · klepni', 'norma ±' + fmt(PROFILE.smooth[0], 1) + ' mg'];
       const lvl = r.v === 'ok' ? 'ok' : r.v === 'mid' ? 'warn' : r.v === 'bad' ? 'bad' : '';
@@ -97,6 +113,7 @@ function renderHealth(){
 }
 function healthTap(id){
   if (id === 'turbo') { showView('tests'); openTest('turbo'); }
+  else if (id === 'turboObd') { showView('tests'); openTest('turboObd'); }
   else if (id === 'maf') { showView('tests'); openTest('maf'); }
   else if (id === 'smooth') { showView('tests'); openTest('smooth'); }
   else if (id === 'temp') openFocus('cool');

@@ -79,9 +79,50 @@
     Object.assign(car, save);
     return rows.join('\n');
   }
+  /* ---- Peugeot 206 1.4 HDi over a Bluetooth ELM327 (OBD-II) ---- */
+  let demoMode = 'kw1281', oTimer = null;
+  const OBD_SUP = [0x01, 0x03, 0x04, 0x05, 0x06, 0x07, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0x10, 0x11, 0x13, 0x15, 0x1C, 0x1F, 0x20, 0x21, 0x30, 0x31, 0x40];
+  function obdVal(p){
+    const c = car, full = c.iq > 30, load = full ? 1 : Math.max(0, (c.iq - 4) / 40);
+    const boost = full ? Math.max(0, Math.min(0.92, (c.rpm - 1300) / 1500 * 0.92)) : load * 0.25;
+    switch (p) {
+      case 0x0C: return [c.rpm * 0.95, 'ot/min']; case 0x0D: return [c.speed, 'km/h']; case 0x05: return [c.cool, '°C']; case 0x0F: return [24 + 18 * load, '°C'];
+      case 0x0B: return [101 + boost * 100, 'kPa']; case 0x10: return [c.rpm * 0.95 * 4 / 120 * (330 + 190 * load) / 1000 * (1 + boost * 0.6), 'g/s'];
+      case 0x04: return [18 + 82 * load, '%']; case 0x11: return [full ? 100 : 40 * load, '%']; case 0x1F: return [Math.round(c.t), 's'];
+      case 0x21: return [0, 'km']; case 0x31: return [1840, 'km'];
+      default: return null;
+    }
+  }
+  function obdLoop(){
+    if (!running) return;
+    if (faultsReq) { faultsReq = 0; setTimeout(() => call('onObdFaults', { mil: false, n: 0, stored: [], pending: ['P0401'] }), 700); }
+    physics(0.12);
+    const p = plan[pi++ % plan.length];
+    if (p === 0x100) call('onPid', { p, v: car.rpm > 400 ? 14.1 : 12.5, u: 'V', r: 'ATRV', ms: 40 });
+    else { const x = OBD_SUP.includes(p) ? obdVal(p) : null; call('onPid', x ? { p, v: x[0], u: x[1], r: '–', ms: 90 + Math.round(Math.random() * 40) } : { p, na: true }); }
+    oTimer = setTimeout(obdLoop, 120);
+  }
+  function obdConnect(){
+    status('Připojuji adaptér OBDII…', 'connecting');
+    setTimeout(() => { if (running) status('Hledám protokol auta (až 20 s)…', 'connecting'); }, 800);
+    setTimeout(() => {
+      if (!running) return;
+      call('onObdInfo', { ver: 'ELM327 v1.5', dev: 'OBDII to RS232 Interpreter', proto: 'ISO 14230-4 (KWP FAST)', protoNum: 5, sup: OBD_SUP, vin: '', rv: 12.4, adapter: 'OBDII', addr: '00:1D:A5:68:98:8B', type: 'classic' });
+      call('onIdent', 'PEUGEOT206 ELM327 v1.5 · ISO 14230-4 (KWP FAST)');
+      status('Živě', 'live'); obdLoop();
+    }, 2200);
+  }
   window.DemoBridge = {
+    setMode(m){ const nm = m === 'obd' ? 'obd' : 'kw1281'; if (nm !== demoMode && running) this.disconnect(); demoMode = nm; },
+    setBt(){}, btPermission(){ call('onBtPerm', true); }, obdInfo(){ return '{}'; },
+    btDevices(){ return JSON.stringify({ perm: true, on: true, sel: LS.get('btAddr'), list: [{ n: 'OBDII', a: '00:1D:A5:68:98:8B', t: 'classic', obd: true, bonded: true }, { n: 'JBL Flip 5', a: '00:42:79:11:22:33', t: 'classic', obd: false, bonded: true }] }); },
+    btScan(){ setTimeout(() => call('onBtFound', { n: 'IOS-Vlink', a: 'C4:00:AB:12:34:56', t: 'ble', obd: true, bonded: false }), 1500); setTimeout(() => call('onBtScanDone', ''), 3500); },
+    obdTrace(){ return ['10:00:00.000  ===== OBD: prohlížeč (ukázka), adaptér OBDII (00:1D:A5:68:98:8B), typ classic', '10:00:00.900  → ATZ', '10:00:01.700  ← ATZ⏎⏎ELM327 v1.5  [800 ms]', '10:00:01.750  → ATE0', '10:00:01.800  ← OK  [40 ms]',
+      '10:00:02.100  → ATSP0', '10:00:02.150  → 0100', '10:00:05.900  ← SEARCHING...⏎41 00 BE 3F A8 13  [3750 ms]', '10:00:06.000  auto odpovídá: protokol 5 (ISO 14230-4 (KWP FAST))', '… (ukázka – v aplikaci tu je celý záznam)'].join('\n'); },
     connect(){
-      if (running) return; running = true;
+      if (running) return;
+      if (demoMode === 'obd') { running = true; obdConnect(); return; }
+      running = true;
       status('Připojuji motor…', 'connecting');
       cTimer = setTimeout(() => {
         if (!running) return;
@@ -91,7 +132,7 @@
         loop();
       }, 900);
     },
-    disconnect(){ running = false; clearTimeout(gTimer); clearTimeout(cTimer); status('Odpojeno', 'idle'); },
+    disconnect(){ running = false; clearTimeout(gTimer); clearTimeout(cTimer); clearTimeout(oTimer); status('Odpojeno', 'idle'); },
     setPlan(s){ const p = String(s).split(',').map(Number).filter(n => n >= 0); if (p.length) { plan = p; pi = 0; } },
     setAddress(){}, setClusterOnConnect(b){ cluOn = !!b; }, setClusterPeriod(){},
     readClusterNow(){ cluNow = true; },
@@ -107,7 +148,7 @@
         gTimer = setTimeout(tick, 250);
       };
       gTimer = setTimeout(tick, 1200);
-    }, readFaults(u){ faultsReq = u === 0x17 ? 0x17 : 1; if (u === 0x17) setTimeout(() => call('onFaults', { u: 0x17, f: [] }), 2500); },
+    }, readFaults(u){ faultsReq = u === 0x17 ? 0x17 : 1; if (demoMode === 'obd') return; if (u === 0x17) setTimeout(() => call('onFaults', { u: 0x17, f: [] }), 2500); },
     beep(k){ (window.__beeps = window.__beeps || []).push(k); },
     say(t, flush){ (window.__says = window.__says || []).push(t);
       try { if (flush) speechSynthesis.cancel(); const u = new SpeechSynthesisUtterance(t), v = demoVoice(); u.lang = 'cs-CZ'; if (v) u.voice = v;

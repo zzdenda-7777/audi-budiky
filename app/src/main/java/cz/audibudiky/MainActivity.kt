@@ -3,6 +3,11 @@ package cz.audibudiky
 import android.Manifest
 import android.app.Activity
 import android.app.PendingIntent
+import android.bluetooth.BluetoothAdapter
+import android.bluetooth.BluetoothDevice
+import android.bluetooth.BluetoothManager
+import android.bluetooth.le.ScanCallback
+import android.bluetooth.le.ScanResult
 import android.content.BroadcastReceiver
 import android.content.ContentValues
 import android.content.Context
@@ -70,6 +75,21 @@ class MainActivity : Activity() {
     @Volatile private var unitReq: UnitReq? = null
     private val unitBauds = HashMap<Int, Int>()
     @Volatile private var cableInfo = ""
+
+    /* ---------- OBD-II over a Bluetooth ELM327 adapter (Peugeot) ----------
+       mode "kw1281" = VAG over the USB K-line cable, "obd" = standard OBD-II over Bluetooth. */
+    @Volatile private var mode = "kw1281"
+    @Volatile private var btAddr = ""
+    @Volatile private var btName = ""
+    @Volatile private var obdInfo = JSONObject()
+    private val obdBuf = ArrayDeque<String>()
+    /** Every ELM command and raw answer, kept for the report (Více → O aplikaci → Rozbor). */
+    private fun otrace(msg: String) {
+        val line = tsFmt.format(Date()) + "  " + msg
+        synchronized(obdBuf) { obdBuf.addLast(line); while (obdBuf.size > 2500) obdBuf.removeFirst() }
+        trace(msg)
+    }
+    private val prefs get() = getSharedPreferences("ab", 0)
     private var locationManager: LocationManager? = null
     /* Czech voice for announcements; plays like navigation (music is ducked, goes to the car radio over Bluetooth). */
     private var tts: TextToSpeech? = null
@@ -125,11 +145,11 @@ class MainActivity : Activity() {
     private val usbReceiver = object : BroadcastReceiver() {
         override fun onReceive(c: Context, i: Intent) {
             when (i.action) {
-                UsbManager.ACTION_USB_DEVICE_DETACHED -> {
+                UsbManager.ACTION_USB_DEVICE_DETACHED -> if (mode != "obd") {
                     running = false
                     status("Kabel odpojen", "idle")
                 }
-                UsbManager.ACTION_USB_DEVICE_ATTACHED -> main.postDelayed({ startConnect(auto = true) }, 800)
+                UsbManager.ACTION_USB_DEVICE_ATTACHED -> if (mode != "obd") main.postDelayed({ startConnect(auto = true) }, 800)
             }
         }
     }
@@ -137,6 +157,7 @@ class MainActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         try { engineBaud = getSharedPreferences("ab", 0).getInt("engineBaud", 10400) } catch (_: Exception) { }
+        try { mode = prefs.getString("mode", "kw1281") ?: "kw1281"; btAddr = prefs.getString("btAddr", "") ?: ""; btName = prefs.getString("btName", "") ?: "" } catch (_: Exception) { }
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         startTts()
         recorder = Recorder(logDir)
@@ -236,7 +257,7 @@ class MainActivity : Activity() {
 
     override fun onNewIntent(intent: Intent?) {
         super.onNewIntent(intent)
-        if (intent?.action == UsbManager.ACTION_USB_DEVICE_ATTACHED && pageReady) {
+        if (intent?.action == UsbManager.ACTION_USB_DEVICE_ATTACHED && pageReady && mode != "obd") {
             main.postDelayed({ startConnect(auto = true) }, 800)
         }
     }
@@ -275,7 +296,7 @@ class MainActivity : Activity() {
 
         @JavascriptInterface
         fun setPlan(csv: String) {
-            val p = csv.split(",", " ", ";").mapNotNull { it.trim().toIntOrNull() }.filter { it in 0..255 }
+            val p = csv.split(",", " ", ";").mapNotNull { it.trim().toIntOrNull() }.filter { it in 0..255 || it == 0x100 }
             if (p.isNotEmpty()) plan = p.toIntArray()
         }
 
@@ -294,6 +315,52 @@ class MainActivity : Activity() {
 
         @JavascriptInterface
         fun readFaults(unit: Int) { faultsReq = unit and 0x7F }
+
+        /** "kw1281" (Audi, USB cable) or "obd" (Peugeot, Bluetooth adapter). Switching stops a running session. */
+        @JavascriptInterface
+        fun setMode(m: String, addr: String) {
+            val nm = if (m == "obd") "obd" else "kw1281"
+            if (nm != mode && running) running = false
+            mode = nm
+            if (addr.isNotEmpty()) btAddr = addr
+            prefs.edit().putString("mode", mode).putString("btAddr", btAddr).apply()
+        }
+
+        @JavascriptInterface
+        fun setBt(addr: String, name: String) {
+            btAddr = addr; btName = name
+            prefs.edit().putString("btAddr", addr).putString("btName", name).apply()
+            otrace("vybraný adaptér: $name ($addr)")
+        }
+
+        /** Paired Bluetooth devices, likely OBD adapters first. */
+        @JavascriptInterface
+        fun btDevices(): String {
+            val o = JSONObject().put("perm", btPermitted()).put("on", false).put("sel", btAddr)
+            if (!btPermitted()) return o.toString()
+            return try {
+                val ad = btAdapter() ?: return o.put("none", true).toString()
+                o.put("on", ad.isEnabled)
+                val arr = JSONArray()
+                ad.bondedDevices.sortedBy { if (looksObd(it.name ?: "")) 0 else 1 }.forEach { d ->
+                    arr.put(JSONObject().put("n", d.name ?: d.address).put("a", d.address).put("t", btType(d)).put("obd", looksObd(d.name ?: "")).put("bonded", true))
+                }
+                o.put("list", arr).toString()
+            } catch (e: Exception) { o.put("err", e.message ?: "?").toString() }
+        }
+
+        /** Looks for adapters that are not paired (BLE ones usually aren't) for 10 s; results go to onBtFound. */
+        @JavascriptInterface
+        fun btScan() { main.post { startBtScan() } }
+
+        @JavascriptInterface
+        fun btPermission() { main.post { askBtPermission() } }
+
+        @JavascriptInterface
+        fun obdTrace(): String = synchronized(obdBuf) { obdBuf.joinToString("\n") }
+
+        @JavascriptInterface
+        fun obdInfo(): String = obdInfo.toString()
 
         /** Reads measuring groups of another unit for a few seconds, then goes back to the engine. Read-only. */
         @JavascriptInterface
@@ -418,6 +485,7 @@ class MainActivity : Activity() {
             .put("cable", cableInfo)
             .put("engineBaud", engineBaud)
             .put("clusterBaud", clusterBaud)
+            .put("mode", mode).put("bt", if (btAddr.isNotEmpty()) "$btName ($btAddr)" else "")
             .toString()
 
         /** What the phone sees on USB right now – for the connection check screen. */
@@ -596,6 +664,11 @@ class MainActivity : Activity() {
 
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == 9) {
+            if (btPermitted()) { js("onBtPerm", "true"); if (obdPending) { obdPending = false; startObd(auto = false) } }
+            else { status("Bluetooth nebyl povolen", "idle"); error("bt-perm", "Aplikace nedostala povolení k Bluetooth (Zařízení v okolí). Bez něj se k adaptéru nepřipojí. Povolíš ho v Nastavení telefonu → Aplikace → Audi Diag → Oprávnění."); js("onBtPerm", "false") }
+            return
+        }
         if (requestCode == 7) {
             if (grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) startGps()
             else js("onGpsState", JSONObject.quote("Přístup k poloze nebyl povolen"))
@@ -659,6 +732,7 @@ class MainActivity : Activity() {
 
     private fun startConnect(auto: Boolean) {
         if (running) return
+        if (mode == "obd") { startObd(auto); return }
         val um = getSystemService(Context.USB_SERVICE) as UsbManager
         val drivers = findDrivers(um)
         if (drivers.isEmpty()) {
@@ -713,6 +787,174 @@ class MainActivity : Activity() {
         running = true
         Thread({ session(port, conn) }, "kw1281").start()
     }
+
+    /* ======================= OBD-II over Bluetooth ======================= */
+    @Volatile private var obdPending = false
+    private fun btAdapter(): BluetoothAdapter? = try { (getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager).adapter } catch (_: Exception) { null }
+    private fun btPerms(): Array<String> = if (Build.VERSION.SDK_INT >= 31) arrayOf(Manifest.permission.BLUETOOTH_CONNECT, Manifest.permission.BLUETOOTH_SCAN)
+        else arrayOf(Manifest.permission.ACCESS_FINE_LOCATION)
+    private fun btPermitted(): Boolean = Build.VERSION.SDK_INT < 31 || checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED
+    private fun askBtPermission() { if (Build.VERSION.SDK_INT >= 23) requestPermissions(btPerms(), 9) }
+    private fun looksObd(n: String) = Regex("OBD|ELM|V-?LINK|VGATE|ICAR|KONNWEI|VEEPEAK|OBDLINK|CAN|SCAN|ANCEL|CARISTA|THINKCAR|LELINK|KW9|VIECAR", RegexOption.IGNORE_CASE).containsMatchIn(n)
+    private fun btType(d: BluetoothDevice) = try { when (d.type) { BluetoothDevice.DEVICE_TYPE_LE -> "ble"; BluetoothDevice.DEVICE_TYPE_DUAL -> "dual"; BluetoothDevice.DEVICE_TYPE_CLASSIC -> "classic"; else -> "?" } } catch (_: SecurityException) { "?" }
+
+    private var scanCb: ScanCallback? = null
+    private val discoveryReceiver = object : BroadcastReceiver() {
+        override fun onReceive(c: Context, i: Intent) {
+            if (i.action != BluetoothDevice.ACTION_FOUND) return
+            @Suppress("DEPRECATION") val d: BluetoothDevice = i.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE) ?: return
+            foundDevice(d)
+        }
+    }
+    private fun foundDevice(d: BluetoothDevice) {
+        val n = try { d.name ?: "" } catch (_: SecurityException) { "" }
+        js("onBtFound", JSONObject().put("n", n.ifEmpty { d.address }).put("a", d.address).put("t", btType(d)).put("obd", looksObd(n)).put("bonded", false).toString())
+    }
+    @android.annotation.SuppressLint("MissingPermission")
+    private fun startBtScan() {
+        if (!btPermitted()) { askBtPermission(); return }
+        val ad = btAdapter() ?: return
+        if (!ad.isEnabled) { js("onBtScanDone", "\"Zapni Bluetooth\""); return }
+        try { if (Build.VERSION.SDK_INT >= 33) registerReceiver(discoveryReceiver, IntentFilter(BluetoothDevice.ACTION_FOUND), Context.RECEIVER_EXPORTED) else registerReceiver(discoveryReceiver, IntentFilter(BluetoothDevice.ACTION_FOUND)) } catch (_: Exception) { }
+        try { ad.startDiscovery() } catch (e: Exception) { otrace("hledání klasických zařízení: ${e.message}") }
+        try {
+            val cb = object : ScanCallback() { override fun onScanResult(type: Int, r: ScanResult) { foundDevice(r.device) } }
+            scanCb = cb
+            ad.bluetoothLeScanner?.startScan(cb)
+        } catch (e: Exception) { otrace("hledání BLE: ${e.message}") }
+        main.postDelayed({
+            try { ad.cancelDiscovery() } catch (_: Exception) { }
+            try { scanCb?.let { ad.bluetoothLeScanner?.stopScan(it) } } catch (_: Exception) { }
+            try { unregisterReceiver(discoveryReceiver) } catch (_: Exception) { }
+            js("onBtScanDone", "\"\"")
+        }, 10000)
+    }
+
+    @android.annotation.SuppressLint("MissingPermission")
+    private fun startObd(auto: Boolean) {
+        if (running) return
+        if (!btPermitted()) {
+            obdPending = true
+            status("Povol Bluetooth (Zařízení v okolí)", "wait")
+            askBtPermission()
+            return
+        }
+        val ad = btAdapter()
+        if (ad == null) { status("Telefon nemá Bluetooth", "idle"); error("bt-none", "Telefon nehlásí Bluetooth."); return }
+        if (!ad.isEnabled) {
+            status("Zapni Bluetooth", "idle")
+            if (!auto) error("bt-off", "Bluetooth je vypnutý. Zapni ho v liště telefonu a klepni na Připojit.")
+            return
+        }
+        if (btAddr.isEmpty()) {
+            // one obvious adapter among the paired devices → take it, otherwise let the user pick
+            val cand = try { ad.bondedDevices.filter { looksObd(it.name ?: "") } } catch (_: Exception) { emptyList() }
+            if (cand.size == 1) { btAddr = cand[0].address; btName = cand[0].name ?: ""; prefs.edit().putString("btAddr", btAddr).putString("btName", btName).apply() }
+            else { status(if (auto) "Klepni na Připojit a vyber adaptér" else "Vyber adaptér", "idle"); if (!auto) js("onBtPick", "\"\""); return }
+        }
+        val dev = try { ad.getRemoteDevice(btAddr) } catch (e: Exception) { null }
+        if (dev == null) { status("Adaptér nenalezen", "idle"); js("onBtPick", "\"\""); return }
+        running = true
+        Thread({ obdSession(ad, dev) }, "obd").start()
+    }
+
+    @android.annotation.SuppressLint("MissingPermission")
+    private fun obdSession(ad: BluetoothAdapter, dev: BluetoothDevice) {
+        val name = try { dev.name ?: dev.address } catch (_: SecurityException) { dev.address }
+        otrace("===== OBD: ${Build.MANUFACTURER} ${Build.MODEL}, Android ${Build.VERSION.RELEASE}, adaptér $name (${dev.address}), typ ${btType(dev)}")
+        var failures = 0
+        var link: BtLink? = null
+        try {
+            while (running && mode == "obd") {
+                var live = false
+                try {
+                    status(if (failures == 0) "Připojuji adaptér $name…" else "Připojuji adaptér znovu…", if (failures == 0) "connecting" else "retry")
+                    if (link == null) {
+                        val t = btType(dev)
+                        link = if (t == "ble") BtLeLink(this, dev) { otrace(it) }.open()
+                        else try { BtClassicLink.open(ad, dev) { otrace(it) } } catch (e: IOException) {
+                            if (t == "dual" || t == "?") { otrace("klasicky to nešlo, zkouším BLE"); BtLeLink(this, dev) { otrace(it) }.open() } else throw e
+                        }
+                    }
+                    val elm = Elm327(link!!) { otrace(it) }
+                    status("Adaptér připojen, nastavuji ho…", "connecting")
+                    elm.init()
+                    status("Hledám protokol auta (až 20 s)…", "connecting")
+                    elm.connectCar()
+                    val vin = elm.readVin()
+                    val rv = try { elm.voltage() } catch (_: ElmError) { null }
+                    obdInfo = JSONObject().put("ver", elm.version).put("dev", elm.device).put("proto", elm.protocol).put("protoNum", elm.protocolNum)
+                        .put("sup", JSONArray(elm.supported.toList())).put("vin", vin).put("rv", rv ?: JSONObject.NULL).put("adapter", name).put("addr", dev.address).put("type", btType(dev))
+                    js("onObdInfo", obdInfo.toString())
+                    js("onIdent", JSONObject.quote("PEUGEOT206 " + (if (vin.isNotEmpty()) "VIN $vin · " else "") + elm.version + " · " + elm.protocol))
+                    failures = 0
+                    live = true
+                    status("Živě", "live")
+                    var i = 0
+                    var lastRv = 0L
+                    var noData = 0
+                    while (running && mode == "obd") {
+                        if (faultsReq != 0) {
+                            faultsReq = 0
+                            status("Čtu chybové kódy…", "faults")
+                            try {
+                                val (mil, n) = try { elm.milStatus() } catch (e: ElmNoData) { Pair(false, -1) }
+                                val st = elm.dtcs(3); val pe = elm.dtcs(7)
+                                otrace("chyby: kontrolka ${if (mil) "svítí" else "nesvítí"}, uložené ${st.joinToString { it.code }.ifEmpty { "žádné" }}, čekající ${pe.joinToString { it.code }.ifEmpty { "žádné" }}")
+                                js("onObdFaults", JSONObject().put("mil", mil).put("n", n).put("stored", JSONArray(st.map { it.code })).put("pending", JSONArray(pe.map { it.code })).toString())
+                            } catch (e: Exception) {
+                                js("onObdFaults", JSONObject().put("err", e.message ?: "?").toString())
+                                if (e !is ElmError) throw e
+                            }
+                            status("Živě", "live")
+                        }
+                        val now = SystemClock.elapsedRealtime()
+                        if (now - lastRv > 4000) {
+                            lastRv = now
+                            try { elm.voltage()?.let { emitPid(0x100, it, "V", "ATRV", 0) } } catch (e: ElmError) { otrace("ATRV: ${e.message}") }
+                        }
+                        val p = plan
+                        if (p.isEmpty()) { SystemClock.sleep(100); continue }
+                        val pid = p[i % p.size]; i++
+                        if (pid == 0x100) {   // the adapter's own battery voltage (OBD pin 16), works on every car
+                            val t1 = SystemClock.elapsedRealtime()
+                            try { elm.voltage()?.let { emitPid(0x100, it, "V", "ATRV", SystemClock.elapsedRealtime() - t1) } } catch (e: ElmError) { otrace("ATRV: ${e.message}") }
+                            lastRv = SystemClock.elapsedRealtime()
+                            continue
+                        }
+                        if (elm.supported.isNotEmpty() && pid !in elm.supported) { emitNa(pid); SystemClock.sleep(5); continue }
+                        val t0 = SystemClock.elapsedRealtime()
+                        try {
+                            val r = elm.pid(pid)
+                            noData = 0
+                            emitPid(pid, r.value, r.unit, r.raw, SystemClock.elapsedRealtime() - t0)
+                            if (r.value != null) recorder.writeObd(pid, r.value, r.unit)
+                        } catch (e: ElmNoData) {
+                            emitNa(pid)
+                            if (++noData > 12) throw ElmError("Auto přestalo odpovídat (12× za sebou NO DATA)")
+                        }
+                    }
+                } catch (e: Exception) {
+                    if (!running) break
+                    failures++
+                    val linkDead = e !is ElmError
+                    status(if (live) "Spojení spadlo, navazuji znovu…" else if (linkDead) "Adaptér se nepřipojil, zkouším znovu…" else "Auto neodpovídá – je zapnuté zapalování?", "retry")
+                    error(if (live) "obd-drop" else if (linkDead) "obd-bt" else "obd-car", (if (live) "Spojení s autem spadlo: " else "") + (e.message ?: e.javaClass.simpleName))
+                    if (linkDead) { try { link?.close() } catch (_: Exception) { }; link = null }
+                    SystemClock.sleep(if (failures < 3) 2500 else 5000)
+                }
+            }
+        } finally {
+            try { link?.close() } catch (_: Exception) { }
+            running = false
+            status("Odpojeno", "idle")
+        }
+    }
+
+    private fun emitPid(pid: Int, v: Double?, unit: String, raw: String, ms: Long) {
+        js("onPid", JSONObject().put("p", pid).put("v", v ?: JSONObject.NULL).put("u", unit).put("r", raw).put("ms", ms).toString())
+    }
+    private fun emitNa(pid: Int) { js("onPid", JSONObject().put("p", pid).put("na", true).toString()) }
 
     /** The USB cable as a K-line for the protocol. */
     private class UsbKLine(private val port: UsbSerialPort) : KLine {

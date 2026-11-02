@@ -15,12 +15,46 @@ const PROFILES = {
     gear: 'manual', smooth: [2.0, 3.0], mafMin: [850, 800], mafNote: 'Hella 850–1050 mg, VW minimum 800 mg', mafIdle: [230, 450], idle: [840, 945],
     boost: [1900, 2000], boostAct: [1750, 2250], iqIdle: [2.2, 9], iqFull: [40, 45], acc0100: 12.6, pump: 'VE', n75: [45, 95],
     n108: [2, 98], soiFull: [6, 14], g149: [1.45, 1.90],
-    src: { smooth: 'VW', acc0100: 'výrobce', kw: 'výrobce', iqIdle: 'VW', cool: 'VW', mafMin: 'Hella/VW', mafIdle: 'VW', idle: 'VW', boost: 'VW', iqFull: 'VW', n75: 'VW', n108: 'VW', soiFull: 'VW', g149: 'VW', fuelT: 'VW' } }
+    src: { smooth: 'VW', acc0100: 'výrobce', kw: 'výrobce', iqIdle: 'VW', cool: 'VW', mafMin: 'Hella/VW', mafIdle: 'VW', idle: 'VW', boost: 'VW', iqFull: 'VW', n75: 'VW', n108: 'VW', soiFull: 'VW', g149: 'VW', fuelT: 'VW' } },
+  /* Peugeot: no VAG protocol, standard OBD-II over a Bluetooth ELM327 adapter. Engine data: 8HZ (DV4TD) 1398 cm³,
+     50 kW at 4000 rpm, fixed-geometry turbo BorgWarner KP35 without intercooler (boost about 0.5–1.0 bar),
+     common rail Bosch EDC16C34 or Siemens SID80x. Torque 150 Nm as in the owner's papers (catalogues differ: 150–160 Nm). */
+  p206: { id: 'p206', say: 'Dvěstěšestka', proto: 'obd', make: 'Peugeot', name: 'Peugeot 206 1.4 HDi eco 70 (2005)', short: '206 1.4 HDi',
+    engine: '8HZ (DV4TD) · 50 kW · 150 Nm · common rail · manuál 5 st. · Bluetooth OBD', cyl: 4, kw: 50, nm: 150, mass: 1060, tank: 50,
+    gear: 'manual', smooth: [2.0, 3.0], mafMin: [0, 0], mafNote: '', mafIdle: null, idle: [750, 900], boost: [0, 0], boostAct: null,
+    boostMax: [0.5, 1.0], iqIdle: [2, 9], iqFull: [0, 0], acc0100: 13.1, pump: 'common rail', n75: [45, 95],
+    src: { kw: 'výrobce', acc0100: 'katalog' } }
 };
 /* Full limit table for the car page, grouped, most important first. Each item: [label, value, source].
    source: text of where the number comes from (VW, výrobce…); empty = our estimate (shown as "orientačně"). */
 function limitRows(){
   const p = PROFILE, sr = k => (p.src && p.src[k]) || '';
+  if (p.proto === 'obd') return [
+    ['Výkon a turbo', [
+      ['Výkon', p.kw + ' kW / ' + Math.round(p.kw * 1.36) + ' k při 4000 ot.', 'výrobce'],
+      ['Moment', p.nm + ' Nm', 'tvoje údaje'],
+      ['Turbo – max plnicí tlak', fmt(p.boostMax[0], 1) + '–' + fmt(p.boostMax[1], 1) + ' bar nad atmosférou (KP35, bez intercooleru)', ''],
+      ['0–100 km/h', fmt(p.acc0100, 1) + ' s (manuál)', 'katalog']
+    ]],
+    ['Motor a vstřikování', [
+      ['Volnoběh', 'kolem 800 ot/min', ''],
+      ['Tlak v railu', 'volnoběh zhruba 250–350 bar, plný plyn až 1350–1600 bar', ''],
+      ['Vstřikování', 'common rail (Bosch EDC16C34 nebo Siemens SID80x)', 'katalog'],
+      ['Zatížení na volnoběhu', 'zhruba 15–30 %', '']
+    ]],
+    ['Teploty', [
+      ['Voda', '80–110 °C (špatně > 115)', ''],
+      ['Nasávaný vzduch', 'do 50 °C (bez intercooleru pod plynem víc)', '']
+    ]],
+    ['Elektro', [
+      ['Napětí za chodu', '13,5–14,7 V (špatně < 13,0)', ''],
+      ['Napětí v klidu', '12,4–12,8 V (špatně < 12,0)', '']
+    ]],
+    ['Co OBD neumí', [
+      ['Vstřik, předvstřik, klidný chod', 'to hlásí jen diagnostika PSA, ne standardní OBD', ''],
+      ['Spotřeba', 'auto z roku 2005 ji přes OBD nehlásí', '']
+    ]]
+  ];
   const rows = [
     ['Výkon a turbo', [
       ['Výkon', p.kw + ' kW / ' + Math.round(p.kw * 1.36) + ' k', 'výrobce'],
@@ -67,12 +101,20 @@ function limitRows(){
 }
 let PROFILE = PROFILES[CFG.profile] || PROFILES.a4v6;
 function setProfile(id){
+  const was = PROFILE ? (PROFILE.proto || 'vag') : null;
   PROFILE = PROFILES[id] || PROFILES.a4v6;
   CFG.profile = PROFILE.id; saveCfg();
+  applyMode();
+  /* switching between cable (Audi) and Bluetooth (Peugeot): connect the new way once the old session stopped */
+  if (was != null && was !== (PROFILE.proto || 'vag') && A && A.connect) setTimeout(() => { if (S.state === 'idle') A.connect(); }, 900);
+  if (typeof reloadPages === 'function') reloadPages();
   if (!S.identCyl) S.cyl = PROFILE.cyl;
   if (typeof renderStatus === 'function') renderStatus();
 }
 const carMass = () => (CFG.massBy && CFG.massBy[PROFILE.id]) || PROFILE.mass;
+/* tells the app which way to talk to the car: USB K-line (Audi) or Bluetooth OBD adapter (Peugeot) */
+function applyMode(){ try { if (A && A.setMode) A.setMode(PROFILE.proto === 'obd' ? 'obd' : 'kw1281', CFG.btAddr || ''); } catch (_) {} }
+applyMode();
 if (!S.identCyl) S.cyl = PROFILE.cyl;
 
 /* ---------- 60 s history of every value (for the mini charts) ---------- */
@@ -174,7 +216,10 @@ const VINFO = {
   range: { co: 'Odhad, kolik ujedeš s palivem v nádrži.', norm: () => 'Palivo z panelu při připojení mínus spotřeba od té doby.', bad: '–', fix: '–' },
   fuelL: { co: 'Palivo v nádrži (odhad od načtení panelu).', norm: () => 'Jen informace.', bad: 'Pod 10 l brzy tankovat, pod 5 l rezerva.', fix: 'Natankuj. ' + (P().cyl === 6 ? 'S málem nafty se VP44 hůř chladí.' : '') },
   volt: { co: 'Napětí palubní sítě (z řídicí jednotky).', norm: () => 'Motor běží: 13,5–14,7 V. Motor stojí: 12,4–12,8 V.', bad: 'Pod 13,0 V za chodu = alternátor nenabíjí. Pod 12,0 V v klidu = vybitá baterie.', fix: 'Alternátor, regulátor, řemen, baterie, kostry.' },
-  rate: { co: 'Kolik skupin hodnot se z motoru přečte za sekundu.', norm: () => '3 a víc je plynulé. Rychlost dělí hodnoty, které jsou vidět.', bad: 'Pod 1 za sekundu.', fix: 'Zobraz méně hodnot, zkontroluj Log chyb.' }
+  load: { co: 'Vypočtené zatížení motoru (%) – kolik z možného výkonu teď motor dává.', norm: () => 'Volnoběh zhruba 15–30 %, plný plyn 90–100 %.', bad: 'Na plný plyn výrazně pod 90 %.', fix: 'Jen informace, používá se k testům (plný plyn).' },
+  rail: { co: 'Tlak paliva v railu (common rail).', norm: () => 'Volnoběh zhruba 250–350 bar, pod plynem roste až na 1350–1600 bar.', bad: 'Kolísá na volnoběhu nebo pod plynem nevyroste.', fix: 'Vysokotlaké čerpadlo, regulátor tlaku, palivový filtr, netěsné vstřikovače.' },
+  mafGs: { co: 'Kolik vzduchu jde do motoru v gramech za sekundu (váha vzduchu).', norm: () => 'Volnoběh zhruba 5–9 g/s, plný plyn ve 4000 ot. zhruba 60–75 g/s (odhad z objemu motoru, doladí se z tvého auta).', bad: 'Na plný plyn výrazně méně.', fix: 'Váha vzduchu, vzduchový filtr, netěsné sání, turbo.' },
+  rate: { co: 'Kolik hodnot se z auta přečte za sekundu.', norm: () => '3 a víc je plynulé. Rychlost dělí hodnoty, které jsou vidět.', bad: 'Pod 1 za sekundu.', fix: 'Zobraz méně hodnot, zkontroluj Log chyb.' }
 };
 const vtext = x => typeof x === 'function' ? x() : (x || '');
 

@@ -36,7 +36,24 @@ function v2root(v){
 }
 
 /* Which groups to read right now – only what is on screen. */
+/* OBD (Peugeot): PIDs for what is on screen, plus rpm and coolant in the background */
+function obdPlan(){
+  let ids;
+  if (curView === 'tests' && TST.cur) ids = TST.cur.obdIds ? TST.cur.obdIds() : ['rpm', 'cool'];
+  else if (D.focus) ids = [D.focus.id];
+  else if (D.hud) ids = D.hud.vals;
+  else if (curView === 'drive' && PAGES[curPage].layout === 'health') ids = ['boost', 'cool', 'volt', 'load', 'iat'];
+  else if (curView === 'charts') ids = ['boost', 'rpm', 'cool', 'load'];
+  else if (curView === 'more' && moreSub === 'groups') ids = VAL.filter(v => v.pid).map(v => v.id);
+  else if (curView === 'trip') ids = ['rpm', 'spd', 'cool'];
+  else ids = PAGES[curPage].vals;
+  const main = pidsFor(ids), bg = pidsFor(['rpm', 'cool']).filter(p => !main.includes(p));
+  if (main.includes(0x0B) && OBD.sup.has(0x33)) bg.push(0x33);
+  const out = main.concat(bg);
+  return out.length ? out : [0x0C];
+}
 function currentPlan(){
+  if (isObd()) return obdPlan();
   if (SCAN.on) { const rest = SCAN.list.filter(g => !SCAN.got[g]); if (rest.length) return rest; }
   if (curView === 'more' && moreSub === 'groups') { const p = groupsPlan(); if (p) return p; }
   if (curView === 'tests' && TST.cur) { const req = TST.cur.need(); if (req.length) return buildPlan(groupsFor([], req)); }
@@ -63,7 +80,7 @@ window.onBack = function(){
 };
 
 /* ---------- status bar ---------- */
-const BUSY = { connecting: 1, retry: 1, wait: 1, cluster: 1, faults: 1 };
+const BUSY = { connecting: 1, retry: 1, wait: 1, cluster: 1, faults: 1, unit: 1 };
 function renderStatus(){
   const dot = $('dot'), live = S.state === 'live';
   dot.className = 'dot ' + (R.on ? 'replay' : live ? 'live' : BUSY[S.state] ? 'busy' : '');
@@ -166,6 +183,26 @@ window.onGroup = d => {
   if (e === CLU) { clearTimeout(cluSaveT); cluSaveT = setTimeout(onCarCluster, 300); }
 };
 window.onFaults = d => onFaultsData(d);
+/* ---- OBD-II (Peugeot) ---- */
+window.onPid = d => {
+  if (R.on || !d) return;
+  if (d.na) { OBD.naN[d.p] = (OBD.naN[d.p] || 0) + 1; if (OBD.naN[d.p] === 3) pushPlan(); return; }
+  OBD.naN[d.p] = 0;
+  OBD.last[d.p] = { v: d.v, u: d.u, r: d.r, t: Date.now(), ms: d.ms };
+  obdIngest(d.p, d.v);
+  if (d.p !== 0x100) S.reads.push(clock());
+};
+window.onObdInfo = o => { OBD.info = o || {}; OBD.sup = new Set((o && o.sup) || []); OBD.naN = {}; if (o && o.addr && CFG.btAddr !== o.addr) { CFG.btAddr = o.addr; CFG.btName = o.adapter || ''; saveCfg(); } pushPlan(true); };
+window.onObdFaults = d => {
+  if (!d) return;
+  if (d.err) { onFaultsData({ u: ENG, err: d.err }); return; }
+  const st = d.stored || [], pe = (d.pending || []).filter(c => !st.includes(c));
+  onFaultsData({ u: ENG, f: st.map(c => ({ c, s: 0 })).concat(pe.map(c => ({ c, s: 0, pend: true }))), mil: d.mil, n: d.n });
+};
+window.onBtPick = () => { if (typeof openBtPicker === 'function') openBtPicker(); };
+window.onBtFound = d => { if (typeof btFound === 'function') btFound(d); };
+window.onBtScanDone = m => { if (typeof btScanDone === 'function') btScanDone(m); };
+window.onBtPerm = ok => { if (typeof btPermDone === 'function') btPermDone(ok); };
 /* another unit (ABS…) was read on request: hand the result to whoever asked */
 window.onUnitIdent = o => { S.unitIdent = S.unitIdent || {}; if (o && o.a != null) S.unitIdent[o.a] = o.id || ''; };
 window.onUnitDone = o => { if (!o) return; UQ.lastErr = o.err || ''; unitDone('unit', o.a, !!o.ok); };

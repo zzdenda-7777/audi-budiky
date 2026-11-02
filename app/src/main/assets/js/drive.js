@@ -10,21 +10,33 @@ const PAGES_DEF = [
   { name: 'Eko', layout: 'grid', vals: ['cons', 'avg', 'cost', 'range', 'spd', 'dist'] },
   { name: 'Teploty', layout: 'grid', vals: ['cool', 'fuelT', 'iat', 'outT', 'volt', 'rpm'] }
 ];
+/* Peugeot (OBD): no injection quantity, timing or N75 – pages built from what standard OBD offers */
+const PAGES_DEF_OBD = [
+  { name: 'Stav', layout: 'health', vals: [] },
+  { name: 'Turbo', layout: 'dial', vals: ['boost', 'rpm', 'load', 'mafGs', 'rail'] },
+  { name: 'Jízda', layout: 'grid', vals: ['spd', 'rpm', 'load', 'dist', 'cool', 'volt'] },
+  { name: 'Teploty', layout: 'grid', vals: ['cool', 'iat', 'outT', 'volt', 'rpm', 'fuelL'] }
+];
+const pagesDef = () => isObd() ? PAGES_DEF_OBD : PAGES_DEF;
+const pagesKey = () => isObd() ? 'pages.obd' : 'pages';
 function validPages(p){
+  const PAGES_DEF = pagesDef();
   let src = Array.isArray(p) && p.length ? p.slice() : PAGES_DEF;
   if (src.length === 3 && !src.some(x => x && x.layout === 'health')) src.unshift(PAGES_DEF[0]); // pages saved by 0.1.9
   const out = [];
   for (let i = 0; i < NPAGES; i++) {
     const x = src[i] || PAGES_DEF[i];
     const layout = SLOTS[x.layout] != null ? x.layout : 'grid';
-    let vals = (x.vals || []).filter((id, k, arr) => VALBY[id] && arr.indexOf(id) === k).slice(0, SLOTS[layout]);
+    let vals = (x.vals || []).filter((id, k, arr) => VALBY[id] && valFits(VALBY[id]) && arr.indexOf(id) === k).slice(0, SLOTS[layout]);
     if (!vals.length && layout !== 'health') vals = (PAGES_DEF[i].vals.length ? PAGES_DEF[i].vals : PAGES_DEF[1].vals).slice(0, SLOTS[layout]);
     out.push({ name: String(x.name || PAGES_DEF[i].name).slice(0, 14), layout, vals });
   }
   return out;
 }
-let PAGES = validPages(KV.get('pages', null));
-const savePages = () => KV.set('pages', PAGES);
+let PAGES = validPages(KV.get(pagesKey(), null));
+const savePages = () => KV.set(pagesKey(), PAGES);
+/* switching between the Audis and the Peugeot swaps the page set */
+function reloadPages(){ PAGES = validPages(KV.get(pagesKey(), null)); curPage = Math.max(0, Math.min(NPAGES - 1, curPage)); if (typeof renderPageChips === 'function' && $('pageChips')) { renderPageChips(); buildPage(); } }
 let curPage = Math.max(0, Math.min(NPAGES - 1, CFG.page | 0));
 
 const D = { slots: [], disp: {}, peak: {}, mm: {}, focus: null, hud: false, lastSlow: 0, lastT: 0 };
@@ -57,7 +69,7 @@ function buildPage(){
   let html = '';
   D.health = p.layout === 'health';
   if (p.layout === 'health') {
-    html = '<div class="hnote" id="hNote" hidden></div>' + HEALTH_ROWS.map(r => '<div class="hrow" role="button" data-h="' + r.id + '"><span class="hdot"></span><div class="htx"><div class="hl">' + r.name + '</div><div class="hs">–</div></div><div class="hv"></div></div>').join('');
+    html = '<div class="hnote" id="hNote" hidden></div>' + HEALTH_ROWS.filter(healthFits).map(r => '<div class="hrow" role="button" data-h="' + r.id + '"><span class="hdot"></span><div class="htx"><div class="hl">' + r.name + '</div><div class="hs">–</div></div><div class="hv"></div></div>').join('');
   } else if (p.layout === 'dial') {
     html = '<div class="dialcard" role="button" data-id="' + p.vals[0] + '">' + (IS_DEMO ? '<span class="demo">UKÁZKA · smyšlená data</span>' : '') + '<canvas></canvas></div>' +
       '<div class="quad">' + p.vals.slice(1).map(id => tileHTML(id)).join('') + '</div>';
@@ -314,7 +326,7 @@ function renderEditor(){
     '</div><p class="note" style="margin-top:8px">' + est + ' Čím méně skupin, tím rychlejší obnova.</p>';
   if (E.layout === 'health') { h = h.slice(0, h.indexOf('<div class="lbl2">Na stránce')); return mountEditor(h); }
   CATS.forEach(([c, cn]) => {
-    const list = VAL.filter(v => v.cat === c && !E.vals.includes(v.id));
+    const list = VAL.filter(v => v.cat === c && valFits(v) && !E.vals.includes(v.id));
     if (!list.length) return;
     h += '<div class="lbl2">' + cn + '</div><div class="chips">' + list.map(v => '<button class="chip" data-add="' + v.id + '"' + (full ? ' disabled' : '') + '>' + esc(v.name) + (valAvailable(v) ? '' : ' · není') + '</button>').join('') + '</div>';
   });
@@ -328,7 +340,7 @@ function mountEditor(h){
   $('edName').oninput = e => { E.name = e.target.value.slice(0, 14); };
   $('edLay').querySelectorAll('button').forEach(b => b.onclick = () => {
     E.layout = b.dataset.l;
-    if (E.layout !== 'health' && !E.vals.length) E.vals = PAGES_DEF[1].vals.slice();
+    if (E.layout !== 'health' && !E.vals.length) E.vals = pagesDef()[1].vals.slice();
     E.vals = E.vals.slice(0, SLOTS[E.layout]); renderEditor(); });
   if ($('edSel')) $('edSel').querySelectorAll('button[data-a]').forEach(b => b.onclick = () => {
     const i = +b.dataset.i, a = b.dataset.a;
@@ -338,10 +350,10 @@ function mountEditor(h){
     renderEditor();
   });
   $('sheet').querySelectorAll('[data-add]').forEach(b => b.onclick = () => { if (E.vals.length < SLOTS[E.layout]) { E.vals.push(b.dataset.add); renderEditor(); } });
-  $('edDef').onclick = () => { E = clone(PAGES_DEF[curPage]); renderEditor(); };
+  $('edDef').onclick = () => { E = clone(pagesDef()[curPage]); renderEditor(); };
   $('edOk').onclick = () => {
     if (!E.vals.length && E.layout !== 'health') return;
-    E.name = (E.name || '').trim() || PAGES_DEF[curPage].name;
+    E.name = (E.name || '').trim() || pagesDef()[curPage].name;
     PAGES[curPage] = E; savePages(); E = null; closeSheet(); renderPageChips(); buildPage(); pushPlan();
   };
 }

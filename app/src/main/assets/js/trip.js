@@ -11,6 +11,7 @@ function saveHist(now){ clearTimeout(histTimer); if (now) KV.set('hist', HIST); 
 let CAR = null;
 function carIdFrom(ident){ const m = /^\s*([0-9A-Z]{9,12})/i.exec(ident || ''); return m ? m[1].toUpperCase() : ((ident || '').trim().slice(0, 24) || 'neznamy'); }
 function autoName(ident){
+  if (/PEUGEOT/i.test(ident || '')) return 'Peugeot 206 1,4 HDi';
   const m = /(\d[,.]\d)\s*l?\s*([RV]\s?\d{1,2})/i.exec(ident || '');
   const diesel = /EDC|TDI|D\b/i.test(ident || '');
   return m ? m[1].replace('.', ',') + (diesel ? ' TDI ' : ' l ') + m[2].replace(/\s/g, '').toUpperCase() : (carIdFrom(ident) || 'Auto');

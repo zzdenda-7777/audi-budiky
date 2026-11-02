@@ -638,8 +638,48 @@ const TESTS = [
     }
   },
 
+
+  /* ---------- turbo over OBD (Peugeot 206 1.4 HDi, fixed-geometry KP35 without intercooler) ----------
+     OBD reports only the actual manifold pressure (PID 0B), not what the unit asks for, so the result is compared
+     with the engine's typical boost (about 0.5–1.0 bar). Marked as an estimate until checked on the car. */
+  { id: 'turboObd', name: 'Turbo (OBD)', sayName: 'Turbo', obdOnly: true, ds: 'Plnicí tlak při plném plynu proti normě motoru', need: () => [], obdIds: () => ['boost', 'rpm', 'load', 'ped'],
+    steps: () => pullSteps(),
+    live: () => [['Turbo', fmt(boostRel(), 2), 'bar'], ['Otáčky', fmt(fresh('rpm'), 0), ''], ['Zatížení', fmt(fresh('load'), 0), '%']],
+    start(){ TST.d = { s: [], last: 0, low: 0 }; TST.st = 'wait'; TST.msg = 'Čekám na plný plyn…'; },
+    tick(){
+      const d = TST.d, rpm = fresh('rpm', 2000), b = boostRel();
+      if (TST.st === 'wait') { if (fullLoad() && rpm != null && rpm > 1300) { TST.st = 'run'; d.t0 = clock(); TST.msg = 'Měřím… drž plný plyn'; beep('timing', 'start', 0, 'Start'); } return; }
+      if (isNew('boostAbs', d.last) && b != null) { d.last = M.boostAbs.t; d.s.push({ t: clock() - d.t0, rpm, b, full: fullLoad() }); }
+      if (offLoad()) { if (!d.low) d.low = clock(); } else d.low = 0;
+      if ((d.low && clock() - d.low > 700) || (rpm || 0) > 4400 || clock() - d.t0 > 25000) this.finish();
+    },
+    finish(){
+      const s = TST.d.s.filter(p => p.full);
+      if (s.length < 5) { TST.st = 'ready'; TST.msg = 'Málo dat. Drž plný plyn déle (od 1500 do 4000 ot.).'; return; }
+      const bm = PROFILE.boostMax || [0.5, 1.0], bs = s.map(p => p.b).sort((x, y) => x - y), mx = bs[Math.floor(bs.length * 0.9)];
+      const mid = s.filter(p => p.rpm >= 2000 && p.rpm <= 3200), midB = mid.length ? median(mid.map(p => p.b)) : null;
+      const si = s.findIndex(p => p.b >= bm[0]), spool = si >= 0 ? s[si].t / 1000 : null;
+      const v = mx < bm[0] - 0.15 ? 'bad' : (mx < bm[0] || mx > bm[1] + 0.3 || (spool != null && spool > 4)) ? 'mid' : 'ok';
+      const head = v === 'ok' ? 'Turbo fouká, jak má – až ' + fmt(mx, 2) + ' bar.' : mx > bm[1] + 0.3 ? 'Tlak je vyšší než obvykle (' + fmt(mx, 2) + ' bar).' : mx < bm[0] ? 'Turbo dává málo tlaku (jen ' + fmt(mx, 2) + ' bar).' : 'Turbo fouká, ale nabíhá pomalu (' + fmt(spool, 1) + ' s).';
+      const why = 'Motor 1.4 HDi má turbo s pevnou geometrií a obtokovým ventilem (wastegate), bez intercooleru. Přes OBD auto hlásí jen skutečný tlak v sání, ne požadovaný, proto se porovnává s obvyklým tlakem tohoto motoru (' + fmt(bm[0], 1) + '–' + fmt(bm[1], 1) + ' bar nad atmosférou). Hodnota je zatím orientační – po prvním rozboru z tvého auta se doladí.';
+      const todo = v === 'ok' ? ['Nic, turbo je v pořádku.', 'Test zopakuj jednou za pár měsíců, ať vidíš, jestli se něco nemění.']
+        : mx < bm[0] ? ['Prohlédni hadice mezi turbem a sáním – mastné místo nebo povolená spona znamená únik.', 'Zkontroluj podtlakovou hadičku k ventilu wastegate a jeho ovládání.', 'Načti chybové kódy – hledej P0299 (nedotlak) nebo kódy snímače tlaku.']
+        : mx > bm[1] + 0.3 ? ['Zkontroluj, jestli se ventil wastegate otvírá (zaseknutý ventil = přetlak).', 'Načti chybové kódy – hledej P0234 (přetlak).'] : ['Zopakuj test na zahřátém motoru.', 'Když nabíhá pomalu pořád, zkontroluj sání a výfuk (ucpaný filtr pevných částic není, ale zanesený EGR ano).'];
+      TST.res = { v, why, head, todo, rows: [['Max tlak', fmt(mx, 2) + ' bar'], ['Tlak 2000–3200 ot.', midB != null ? fmt(midB, 2) + ' bar' : '–'], ['Nabuzení na ' + fmt(bm[0], 1) + ' bar', spool != null ? fmt(spool, 1) + ' s' : 'nedosáhlo'], ['Atmosféra', fmt(S.base, 0) + ' mbar'], ['Měření', s.length + '×']],
+        sum: 'max ' + fmt(mx, 2) + ' bar', chart: { a: sortX(s.map(p => [p.rpm, p.b])) } };
+      TST.res.num = { maxB: mx, midB, spool };
+      finishGrade(TST.res, [
+        { n: 'Max plnicí tlak', val: fmt(mx, 2) + ' bar', norm: fmt(bm[0], 1) + '–' + fmt(bm[1], 1) + ' bar (orientačně)', s: sc(mx, [[bm[0] - 0.4, 0], [bm[0] - 0.15, 40], [bm[0], 70], [(bm[0] + bm[1]) / 2, 100], [bm[1] + 0.3, 70], [bm[1] + 0.6, 30]]), w: 3 },
+        { n: 'Nabuzení turba', val: spool != null ? fmt(spool, 1) + ' s' : 'nedosáhlo', norm: 'do 4 s', s: spool == null ? 10 : sc(spool, [[0.5, 100], [2, 88], [4, 70], [6, 45], [9, 15]]), w: 1 }
+      ]);
+      testDone('turboObd');
+    },
+    chart(cv, c){ drawXY(cv, [{ pts: c.a, color: TH.red }], [1000, 4500], [0, 1.6], v => fmt(v / 1000, 1) + 'k', v => fmt(v, 1)); },
+    legend: '<span class="k"><i style="background:#ff3d2e"></i>tlak turba</span> · bar podle otáček'
+  },
+
   /* ---------- battery and charging ---------- */
-  { id: 'batt', name: 'Baterie a nabíjení', sayName: 'Baterie', ds: 'Baterie bez motoru, nabíjení na volnoběhu a pod zátěží', need: () => [[12]],
+  { id: 'batt', name: 'Baterie a nabíjení', sayName: 'Baterie', obd: true, obdIds: () => ['volt', 'rpm'], ds: 'Baterie bez motoru, nabíjení na volnoběhu a pod zátěží', need: () => [[12]],
     steps: () => ['Začni s vypnutým motorem a zapnutým zapalováním: připoj se a spusť test.', 'Až aplikace řekne, nastartuj. Spojení na chvíli spadne a aplikace se připojí sama.',
       'Na volnoběhu zapni světla, ventilátor topení naplno a vyhřívání zadního okna, pak klepni na „Mám zapnuto“.', 'Když už motor běží, část bez motoru se přeskočí.'],
     live: () => [['Napětí', fmt(fresh('volt', 8000), 2), 'V'], ['Otáčky', fmt(fresh('rpm', 3000), 0), '']],
@@ -706,7 +746,7 @@ const TESTS = [
   },
 
   /* ---------- thermostat (runs in the background while you drive) ---------- */
-  { id: 'thermo', name: 'Termostat', sayName: 'Termostat', bg: true, ds: 'Jestli se motor zahřeje a drží teplotu i v rychlé jízdě', need: () => [[1, 7, 12]],
+  { id: 'thermo', name: 'Termostat', sayName: 'Termostat', bg: true, obd: true, obdIds: () => ['cool', 'spd', 'rpm'], ds: 'Jestli se motor zahřeje a drží teplotu i v rychlé jízdě', need: () => [[1, 7, 12]],
     steps: () => ['Nejlépe začni se studeným motorem (auto stálo pár hodin).', 'Spusť test a normálně jeď. Test běží, i když přepneš na jinou obrazovku.',
       'Po zahřátí jeď aspoň 3 minuty rychleji (okreska nebo dálnice, nad 70 km/h).', 'Vyhodnotí se sám, nebo klepni na „Vyhodnotit teď“.'],
     live: () => [['Voda', fmt(fresh('cool', 10000), 0), '°C'], ['Rychlost', fmt(gpsSpeed() != null ? gpsSpeed() : fresh('spdEcu', 3000), 0), 'km/h'], ['Čas', TST.d && TST.d.t0 && TST.st !== 'ready' ? Math.floor((clock() - TST.d.t0) / 60000) + ' min' : '–', '']],
@@ -815,11 +855,11 @@ const TESTS = [
   },
 
   /* ---------- clutch slip: rpm against road speed in one gear ---------- */
-  { id: 'clutch', name: 'Prokluz spojky', sayName: 'Spojka', ds: 'Plný plyn v jedné rychlosti: jdou otáčky s rychlostí?', need: () => S.unsup.has(6) ? [[1]] : [[1], [6]],
+  { id: 'clutch', name: 'Prokluz spojky', sayName: 'Spojka', obd: true, obdIds: () => ['rpm', 'spd', 'load', 'ped'], ds: 'Plný plyn v jedné rychlosti: jdou otáčky s rychlostí?', need: () => S.unsup.has(6) ? [[1]] : [[1], [6]],
     block: () => (fresh('spdEcu', 3000) == null && gpsSpeed() == null) ? 'Potřebuju rychlost – zapni GPS (Více → Nastavení).' : '',
     steps: () => ['Jen pro manuální převodovku. Motor zahřátý, rovná silnice nebo mírný kopec.', 'Zařaď 4. rychlost (klidně i 5.) a jeď rovnoměrně kolem 1500 ot.',
       'Až aplikace řekne „Plný plyn“, sešlápni plyn na podlahu a drž až do 3500 ot. Neřaď.', 'Měř jen tam, kde je to bezpečné a legální.'],
-    live: () => { const s = clutchSpeed(); return [['Otáčky', fmt(fresh('rpm'), 0), ''], ['Rychlost', s ? fmt(s.v, 0) : '–', 'km/h'], ['Dávka', fmt(fresh('iq'), 1), 'mg']]; },
+    live: () => { const s = clutchSpeed(); return [['Otáčky', fmt(fresh('rpm'), 0), ''], ['Rychlost', s ? fmt(s.v, 0) : '–', 'km/h'], isObd() ? ['Zatížení', fmt(fresh('load'), 0), '%'] : ['Dávka', fmt(fresh('iq'), 1), 'mg']]; },
     start(){ TST.d = { ph: 'base', base: [], s: [], sp: [], lastSp: 0, last: 0, low: 0 }; TST.st = 'wait'; TST.msg = 'Jeď rovnoměrně kolem 1500 ot. ve 4. rychlosti…'; },
     tick(){
       const d = TST.d, rpm = fresh('rpm', 1500), iq = fresh('iq', 2500), sp = clutchSpeed();
@@ -828,17 +868,17 @@ const TESTS = [
       if (!isNew('rpm', d.last)) return; d.last = M.rpm.t;
       if (rpm == null || !sp) return;
       if (d.ph === 'base' || d.ph === 'armed') {
-        if (iq != null && iq < 25 && rpm > 1100 && rpm < 2300 && sp.v > 25) {
+        if (lightLoad() && rpm > 1100 && rpm < 2300 && sp.v > 25) {
           d.base.push(rpm / sp.v); d.base = d.base.slice(-8);
           const md = median(d.base);
           if (d.ph === 'base' && d.base.length >= 6 && d.base.every(r => Math.abs(r - md) / md < 0.02)) { d.ph = 'armed'; TST.msg = 'Připraveno – plný plyn až do 3500 ot.'; beep('timing', 'info', 0, 'Plný plyn'); }
         }
-        if (d.ph === 'armed' && iq != null && iq > 30) { d.rb = median(d.base); d.ph = 'pull'; d.t0 = clock(); TST.st = 'run'; TST.msg = 'Měřím… drž plný plyn, neřaď'; beep('timing', 'start', 0, 'Start'); }
+        if (d.ph === 'armed' && fullLoad()) { d.rb = median(d.base); d.ph = 'pull'; d.t0 = clock(); TST.st = 'run'; TST.msg = 'Měřím… drž plný plyn, neřaď'; beep('timing', 'start', 0, 'Start'); }
         return;
       }
       if (d.ph === 'end') { if (clock() - d.te > 1500) this.finish(); return; }
-      d.s.push({ t: M.rpm.t, rpm, iq });
-      if (iq != null && iq < 15) { if (!d.low) d.low = clock(); } else d.low = 0;
+      d.s.push({ t: M.rpm.t, rpm, iq, full: fullLoad() });
+      if (offLoad()) { if (!d.low) d.low = clock(); } else d.low = 0;
       if ((d.low && clock() - d.low > 700) || rpm > 4200 || clock() - d.t0 > 25000) { d.ph = 'end'; d.te = clock(); }
     },
     finish(){
@@ -846,17 +886,17 @@ const TESTS = [
       /* speed at the exact moment each rpm was read (linear between the two neighbouring speed readings) */
       const spAt = t => { const a = d.sp; for (let i = 1; i < a.length; i++) if (a[i].t >= t && a[i - 1].t <= t) { const k = (t - a[i - 1].t) / Math.max(1, a[i].t - a[i - 1].t); return { v: a[i - 1].v + (a[i].v - a[i - 1].v) * k, src: a[i].src }; } return null; };
       d.s.forEach(p => { const q = spAt(p.t); if (q) { p.v = q.v; p.src = q.src; p.r = p.rpm / Math.max(1, q.v); } });
-      const pts = d.s.filter(p => p.v != null && p.iq != null && p.iq > 30 && p.rpm >= 1600 && p.rpm <= 3800 && p.v > 25);
+      const pts = d.s.filter(p => p.v != null && p.full && p.rpm >= 1600 && p.rpm <= 3800 && p.v > 25);
       if (!rb || pts.length < 5) { TST.st = 'ready'; TST.msg = 'Málo dat. Drž plný plyn déle a neřaď.'; return; }
       const rel = pts.map(p => (p.r - rb) / rb * 100), mid0 = median(rel);
       if (Math.abs(mid0) > 12) { TST.st = 'ready'; TST.msg = 'Během měření se změnil převod (zařadil jsi?). Zkus to znovu.'; return; }
       const sm = rel.map((x, i) => median(rel.slice(Math.max(0, i - 1), i + 2)));
       const slip = Math.max(0, ...sm), at = pts[sm.indexOf(Math.max(...sm))].rpm, gps = pts.filter(p => p.src === 'gps').length > pts.length / 2;
-      const okL = gps ? 4 : 2.5, midL = gps ? 7 : 5;
+      const okL = gps ? 4 : 2.5, midL = gps ? 7 : 5;   // speed from the engine unit (VAG group 006 or OBD 0D) is exact enough for 2.5 %
       const v = slip > midL ? 'bad' : slip > okL ? 'mid' : 'ok';
       const head = v === 'ok' ? 'Spojka drží – otáčky jdou s rychlostí.' : v === 'mid' ? 'Spojka při plném plynu trochu prokluzuje (asi ' + fmt(slip, 1) + ' % kolem ' + fmt(at, 0) + ' ot.).' : 'Spojka prokluzuje (asi ' + fmt(slip, 1) + ' % kolem ' + fmt(at, 0) + ' ot.).';
       const why = 'Když spojka drží, otáčky a rychlost rostou ve stejném poměru. Když prokluzuje, otáčky při plném plynu utečou rychleji než rychlost – nejvíc tam, kde má motor největší moment. ' +
-        (gps ? 'Rychlost je z GPS, takže měření je méně přesné – odchylka do 4 % je normální.' : 'Rychlost je z jednotky motoru, měření je přesné.');
+        (gps ? 'Rychlost je z GPS, takže měření je méně přesné – odchylka do 4 % je normální.' : 'Rychlost je z řídicí jednotky, měření je přesné.');
       const todo = v === 'ok' ? ['Nic, spojka je v pořádku.'] : v === 'mid' ? ['Zopakuj test v 5. rychlosti, tam je spojka zatížená nejvíc.', 'Sleduj, jestli otáčky při předjíždění neutíkají – spojka se blíží konci.']
         : ['Počítej s výměnou spojky. U těchhle motorů se při ní obvykle mění i dvouhmotový setrvačník – nech ho změřit.', 'Do výměny nejezdi na plný plyn v nízkých otáčkách, spojku to rychle dorazí.'];
       TST.res = { v, why, head, todo, rows: [['Největší prokluz', fmt(slip, 1) + ' %'], ['Při otáčkách', fmt(at, 0)], ['Poměr otáčky/rychlost', fmt(rb, 1)], ['Zdroj rychlosti', gps ? 'GPS' : 'jednotka motoru'], ['Měření', pts.length + '×']],
@@ -869,7 +909,7 @@ const TESTS = [
     legend: '<span class="k"><i style="background:#ff3d2e"></i>prokluz %</span> · podle otáček'
   }
 ,
-  { id: 'acc', name: 'Zrychlení', ds: '0–100, 60–100, 80–120 km/h podle GPS', need: () => [], needGps: true,
+  { id: 'acc', name: 'Zrychlení', obd: true, obdIds: () => ['rpm'], ds: '0–100, 60–100, 80–120 km/h podle GPS', need: () => [], needGps: true,
     steps: () => ['Zapni GPS a počkej na signál.', 'Zastav (u 0–100), nebo zpomal pod začátek měření.', 'Zrychli – měření se spustí a zastaví samo.', 'Měř jen tam, kde je to bezpečné a legální.'],
     live: () => [['GPS', fmt(gpsSpeed(), 0), 'km/h'], ['Čas', TST.d && TST.d.run ? fmt((performance.now() - TST.d.p0) / 1000, 1) : (TST.res && TST.res.time != null ? fmt(TST.res.time, 2) : '–'), 's']],
     range(){ const [a, b] = CFG.accMode.split('-').map(Number); return { a, b }; },
@@ -913,7 +953,8 @@ const TESTS = [
 ];
 const TESTBY = {}; TESTS.forEach(t => TESTBY[t.id] = t);
 /* list order: on the spot first, then the ones that need a drive */
-const TEST_GROUPS = [['Na místě', ['pump', 'smooth', 'cold', 'egr', 'batt', 'ctemp']], ['Za jízdy', ['turbo', 'maf', 'wheels', 'clutch', 'thermo', 'dyno', 'acc']]];
+const TEST_GROUPS = [['Na místě', ['pump', 'smooth', 'cold', 'egr', 'batt', 'ctemp']], ['Za jízdy', ['turbo', 'turboObd', 'maf', 'wheels', 'clutch', 'thermo', 'dyno', 'acc']]];
+const testFits = t => isObd() ? !!(t.obd || t.obdOnly) : !t.obdOnly;
 
 /* ---------- rendering ---------- */
 function testBlocked(t){
@@ -932,7 +973,7 @@ function renderTestsList(){
       (last ? '<div class="ds" style="margin-top:6px">' + gradeHTML(last) + ' <span class="mono">' + dateTxt(last.t) + ' · ' + esc(last.sum || '') + '</span></div>' : '') +
       '</div><span class="chev">' + ICON.chev + '</span></button>';
   };
-  $('testsBody').innerHTML = TEST_GROUPS.map((g, i) => '<div class="lbl2"' + (i ? '' : ' style="margin-top:0"') + '>' + g[0] + '</div><div class="list">' + g[1].map(id => item(TESTBY[id])).join('') + '</div>').join('') + '<p class="note" style="margin-top:12px">Během testu se čtou jen hodnoty, které test potřebuje, takže je měření co nejrychlejší.</p>';
+  $('testsBody').innerHTML = TEST_GROUPS.map(g => [g[0], g[1].filter(id => TESTBY[id] && testFits(TESTBY[id]))]).filter(g => g[1].length).map((g, i) => '<div class="lbl2"' + (i ? '' : ' style="margin-top:0"') + '>' + g[0] + '</div><div class="list">' + g[1].map(id => item(TESTBY[id])).join('') + '</div>').join('') + (isObd() ? '<p class="note" style="margin-top:12px">Peugeot přes OBD: testy, které potřebují vstřik, předvstřik nebo klidný chod válců, standardní OBD neumí – ty zná jen diagnostika PSA.</p>' : '') + '<p class="note" style="margin-top:12px">Během testu se čtou jen hodnoty, které test potřebuje, takže je měření co nejrychlejší.</p>';
   $('testsBody').querySelectorAll('[data-t]').forEach(b => b.onclick = () => openTest(b.dataset.t));
 }
 function openTest(id){

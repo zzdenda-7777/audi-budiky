@@ -47,7 +47,7 @@ const CMP_ROWS = [
   ['Motor', 'Výkon', 'kW', 0, 'hi', c => nz(tnum(c, 'dyno') && tnum(c, 'dyno').kw), c => { const n = tnum(c, 'dyno'); return n && n.kw ? n.kw / profOf(c).kw * 100 : null; }, 'dyno'],
   ['Motor', 'Moment', 'Nm', 0, 'hi', c => nz(tnum(c, 'dyno') && tnum(c, 'dyno').nm), c => { const n = tnum(c, 'dyno'); return n && n.nm ? n.nm / profOf(c).nm * 100 : null; }, 'dyno'],
   ['Motor', 'Výkon na kolech (GPS)', 'kW', 0, 'hi', c => nz(tnum(c, 'dyno') && tnum(c, 'dyno').wheel), c => { const n = tnum(c, 'dyno'); return n && n.wheel ? n.wheel / profOf(c).kw * 100 : null; }, 'dyno'],
-  ['Motor', 'Turbo – max tlak v testu', 'bar', 2, 'hi', c => nz(tnum(c, 'turbo') && tnum(c, 'turbo').maxAct), null, 'turbo'],
+  ['Motor', 'Turbo – max tlak v testu', 'bar', 2, 'hi', c => nz((tnum(c, 'turbo') && tnum(c, 'turbo').maxAct) || (tnum(c, 'turboObd') && tnum(c, 'turboObd').maxB)), null, 'turbo'],
   ['Motor', 'Turbo – N75 při plném tlaku', '%', 0, 'lo', c => nz(tnum(c, 'turbo') && tnum(c, 'turbo').dutyHi), null, 'turbo'],
   ['Motor', 'Studený start – nejhorší válec', 'mg', 2, 'lo', c => nz(tnum(c, 'cold') && tnum(c, 'cold').worst), null, 'cold'],
   ['Podvozek', 'Kola – největší rozdíl', '%', 2, 'lo', c => nz(tnum(c, 'wheels') && tnum(c, 'wheels').worst), null, 'wheels'],
