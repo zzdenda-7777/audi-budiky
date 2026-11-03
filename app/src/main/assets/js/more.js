@@ -93,10 +93,11 @@ function onFaultsData(d){
   FLT.busy = null;
   if (d.err) FLT[key] = { t: Date.now(), err: d.err };
   else {
-    const list = (d.f || []).map(x => x.pend ? { c: x.c, s: x.s, pend: true } : { c: x.c, s: x.s }); FLT[key] = { t: Date.now(), list, mil: d.mil }; saveFaults(d.u, list);
+    const list = (d.f || []).map(x => x.pend ? { c: x.c, s: x.s, pend: true } : { c: x.c, s: x.s }); FLT[key] = { t: Date.now(), list, mil: d.mil }; saveFaults(d.u, list, d.mil);
     beep('drive', 'info', 0, list.length ? 'V paměti ' + (list.length >= 2 && list.length <= 4 ? 'jsou ' : 'je ') + list.length + ' ' + czPl(list.length, 'chyba', 'chyby', 'chyb') : 'Paměť chyb je čistá');
   }
   if (curView === 'more' && moreSub === 'faults') renderFaults();
+  if (curView === 'trip' && tripMode === 'hist') renderHistory();
   unitDone('faults', d.u, !d.err);
 }
 function faultBlock(name, r){

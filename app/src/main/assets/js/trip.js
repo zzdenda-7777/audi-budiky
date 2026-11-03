@@ -18,7 +18,10 @@ function autoName(ident){
 }
 function carObj(id){
   if (!HIST.cars[id]) HIST.cars[id] = { id, name: id === '_none' ? 'Bez připojení k autu' : id, ecu: '', clu: '', first: Date.now(), seen: Date.now(), tests: {}, log: [], acc: {}, last: {}, faults: {} };
-  const c = HIST.cars[id]; c.tests = c.tests || {}; c.log = c.log || []; c.acc = c.acc || {}; c.last = c.last || {}; c.faults = c.faults || {};
+  const c = HIST.cars[id]; c.tests = c.tests || {}; c.log = c.log || []; c.acc = c.acc || {}; c.last = c.last || {}; c.faults = c.faults || {}; c.vals = c.vals || {};
+  if (!Array.isArray(c.faultLog)) {          // older versions kept only the last read of each unit
+    c.faultLog = ['eng', 'clu'].map(u => c.faults[u] && c.faults[u].list ? { t: c.faults[u].t, u, list: c.faults[u].list } : null).filter(Boolean).sort((a, b) => a.t - b.t);
+  }
   return c;
 }
 function onCarIdent(ident){
@@ -42,13 +45,13 @@ function onCarCluster(){
 function saveTest(id, res){
   const c = carObj(CAR || '_none');
   const rec = { t: Date.now(), v: res.v, sum: res.sum || '', rows: res.rows || [], num: res.num || null, prof: PROFILE.id, score: res.score != null ? res.score : null, grade: res.grade || null };
-  c.tests[id] = rec; c.log.unshift(Object.assign({ id }, rec)); c.log = c.log.slice(0, 40);
+  c.tests[id] = rec; c.log.unshift(Object.assign({ id }, rec)); c.log = c.log.slice(0, 300);
   saveHist(true);
 }
 function lastTest(id){ const c = HIST.cars[CAR || '_none'] || (CAR ? null : Object.values(HIST.cars)[0]); return c && c.tests ? c.tests[id] || null : null; }
 function saveAcc(mode, time){
   const c = carObj(CAR || '_none'), a = c.acc[mode] || (c.acc[mode] = { best: null, last: [] });
-  a.last.unshift({ t: Date.now(), v: time }); a.last = a.last.slice(0, 10);
+  a.last.unshift({ t: Date.now(), v: time }); a.last = a.last.slice(0, 50);
   if (a.best == null || time < a.best) a.best = time;
   saveHist(true);
 }
@@ -57,16 +60,45 @@ function accHistHTML(){
   if (!a) return '';
   return '<p class="note" style="margin-top:8px">Nejlepší ' + CFG.accMode.replace('-', '–') + ': <b style="color:var(--text)">' + fmt(a.best, 2) + ' s</b> · poslední: ' + a.last.slice(0, 5).map(x => fmt(x.v, 2)).join(', ') + '</p>';
 }
-function saveFaults(unit, list){ if (!CAR) return; const c = carObj(CAR); c.faults[unit === CLU ? 'clu' : 'eng'] = { t: Date.now(), list }; saveHist(true); }
+/* every read of the fault memory is kept (Cesta → Historie → Chyby), not just the last one */
+function saveFaults(unit, list, mil){
+  if (!CAR) return;
+  const c = carObj(CAR), u = unit === CLU ? 'clu' : 'eng', t = Date.now();
+  c.faults[u] = { t, list };
+  c.faultLog.push({ t, u, list, mil: mil != null ? !!mil : undefined, odo: any('odo') != null ? Math.round(any('odo')) : undefined });
+  c.faultLog = c.faultLog.slice(-300);
+  saveHist(true);
+}
 
 /* ---------------- trip ---------------- */
 let TRIP = null, FUEL0 = null, tripSaveT = 0;
-function newTrip(){ return { id: Date.now(), car: CAR, start: Date.now(), last: Date.now(), km: 0, fuel: 0, maxBoost: 0, maxRpm: 0, maxSpd: 0, maxCool: 0, maxIq: 0, minAfr: null, odo0: any('odo'),
+function newTrip(){ return { id: Date.now(), car: CAR, start: Date.now(), last: Date.now(), km: 0, fuel: 0, st: {}, maxBoost: 0, maxRpm: 0, maxSpd: 0, maxCool: 0, maxIq: 0, minAfr: null, odo0: any('odo'),
   maxFuelT: 0, maxIat: null, voltSum: 0, voltN: 0, coldStart: null, warmSec: null, rateSum: 0, rateN: 0 }; }
 function tripSummary(t){
   return { id: t.id, car: t.car, start: t.start, end: t.last, km: +t.km.toFixed(2), fuel: +t.fuel.toFixed(3), avg: t.km > 0.5 ? +(t.fuel / t.km * 100).toFixed(2) : null,
     cost: +(t.fuel * CFG.price).toFixed(1), maxLoad: t.maxLoad != null ? Math.round(t.maxLoad) : null, maxBoost: t.maxBoost, maxRpm: t.maxRpm, maxSpd: t.maxSpd, maxCool: t.maxCool, maxIq: t.maxIq, minAfr: t.minAfr, odo0: t.odo0,
-    maxFuelT: t.maxFuelT || null, maxIat: t.maxIat, voltAvg: t.voltN ? +(t.voltSum / t.voltN).toFixed(2) : null, warmSec: t.warmSec, rateAvg: t.rateN ? +(t.rateSum / t.rateN).toFixed(1) : null, hasTrk: !!t.hasTrk, price: CFG.price };
+    maxFuelT: t.maxFuelT || null, maxIat: t.maxIat, voltAvg: t.voltN ? +(t.voltSum / t.voltN).toFixed(2) : null, warmSec: t.warmSec, rateAvg: t.rateN ? +(t.rateSum / t.rateN).toFixed(1) : null, hasTrk: !!t.hasTrk, price: CFG.price,
+    prof: PROFILE.id, st: statsSummary(t.st) };
+}
+/* every value shown in the app, sampled once a second while connected: per trip [n, sum, min, max], per car last value and all-time low/high */
+const HIST_SKIP = new Set(['dist', 'cost', 'avg', 'range', 'rate']);
+function statsSummary(st){
+  const out = {};
+  Object.keys(st || {}).forEach(k => { const s = st[k], v = VALBY[k]; if (!s || !s[0]) return; const d = Math.min(3, (v ? v.d : 1) + 1), r = x => +x.toFixed(d); out[k] = [r(s[2]), r(s[1] / s[0]), r(s[3]), s[0]]; });
+  return out;
+}
+function histSample(){
+  if (!TRIP || !CAR) return;
+  const c = carObj(CAR), now = Date.now(); TRIP.st = TRIP.st || {};
+  VAL.forEach(v => {
+    if (HIST_SKIP.has(v.id) || !valFits(v) || !valAvailable(v)) return;
+    let x = null; try { x = v.id === 'cons' ? l100() : v.get(); } catch (_) {}
+    if (x == null || !isFinite(x)) return;
+    const s = TRIP.st[v.id] || (TRIP.st[v.id] = [0, 0, x, x]); s[0]++; s[1] += x; if (x < s[2]) s[2] = x; if (x > s[3]) s[3] = x;
+    const h = c.vals[v.id];
+    if (!h) c.vals[v.id] = { v: x, t: now, min: x, tMin: now, max: x, tMax: now };
+    else { h.v = x; h.t = now; if (x < h.min) { h.min = x; h.tMin = now; } if (x > h.max) { h.max = x; h.tMax = now; } }
+  });
 }
 function archiveTrip(t){
   if (!t) return;
@@ -120,6 +152,7 @@ function tripTick(dt){
   const it = fresh('iat', 10000); if (it != null) TRIP.maxIat = TRIP.maxIat == null ? it : Math.max(TRIP.maxIat, it);
   const vo = fresh('volt', 10000), rp = fresh('rpm', 3000) || 0; if (vo != null && rp > 700) { TRIP.voltSum = (TRIP.voltSum || 0) + vo; TRIP.voltN = (TRIP.voltN || 0) + 1; }
   const rr = readRate(); if (rr) { TRIP.rateSum = (TRIP.rateSum || 0) + rr; TRIP.rateN = (TRIP.rateN || 0) + 1; }
+  if (Date.now() - (TRIP.sT || 0) >= 1000) { TRIP.sT = Date.now(); histSample(); }
   TRIP.last = Date.now();
   if (Date.now() - tripSaveT > 20000) { tripSaveT = Date.now(); saveTrip(); if (CAR) { const cc = carObj(CAR); cc.seen = Date.now(); if (fresh('cool', 10000) != null) cc.last.cool = fresh('cool', 10000); if (fuelNow() != null) cc.last.fuelL = fuelNow(); if (cc.last.odo != null && TRIP.odo0 != null) cc.last.odoNow = TRIP.odo0 + TRIP.km; saveHist(); } }
 }
@@ -248,7 +281,7 @@ function openFillSheet(){
 function fuelFill(c, mode, litres){
   const tank = PROFILE.tank || 50, used = c.fuelUsed || 0, before = fuelNow();
   let msg = 'Uloženo';
-  c.fuelLog = (c.fuelLog || []).concat([{ t: Date.now(), mode, l: litres, before: before != null ? +before.toFixed(1) : null, used: +used.toFixed(2), k: +fuelK().toFixed(3) }]).slice(-30);
+  c.fuelLog = (c.fuelLog || []).concat([{ t: Date.now(), mode, l: litres, before: before != null ? +before.toFixed(1) : null, used: +used.toFixed(2), k: +fuelK().toFixed(3), price: CFG.price }]).slice(-200);
   if (mode === 'full') {
     if (c.full) {
       const real = litres + (c.full.added || 0), est = used - c.full.used;
@@ -266,39 +299,4 @@ function fuelFill(c, mode, litres){
   } else { c.tank = { l: Math.min(tank, litres), used, t: Date.now() }; msg = 'V nádrži ' + fmt(Math.min(tank, litres), 0) + ' l'; }
   saveHist(true);
   return msg;
-}
-
-function renderHistory(){
-  const cars = Object.values(HIST.cars).filter(c => c.id !== '_none' || (c.log && c.log.length)).sort((a, b) => (b.seen || 0) - (a.seen || 0));
-  if (!cars.length) { $('tripBody').innerHTML = '<div class="empty"><b>Zatím žádná historie</b>Po prvním připojení k autu se sem ukládají jízdy, výsledky testů a poslední hodnoty.</div>'; return; }
-  if (!histCar || !HIST.cars[histCar]) histCar = (CAR && HIST.cars[CAR]) ? CAR : cars[0].id;
-  const c = HIST.cars[histCar];
-  let h = cars.length > 1 ? '<div class="chips" style="margin-bottom:10px">' + cars.map(x => '<button class="chip' + (x.id === histCar ? ' on' : '') + '" data-car="' + esc(x.id) + '">' + esc(x.name) + '</button>').join('') + '</div>' : '';
-  const L = c.last || {}, cObd = (PROFILES[c.profile] || {}).proto === 'obd';
-  h += '<div class="card"><h3 style="gap:10px"><input id="carName" value="' + esc(c.name) + '" maxlength="24" style="flex:1;font-family:var(--cond);font-weight:700;font-size:17px;padding:6px 10px" aria-label="Název auta"></h3>' +
-    kvRows1([['Naposledy', c.seen ? dtShort(c.seen) : '–'], ['Stav km', L.odoNow != null ? fmt(L.odoNow, 0) : L.odo != null ? fmt(L.odo, 0) : '–'],
-      ['Palivo' + (cObd ? ' ≈' : ''), L.fuelL != null ? fmt(L.fuelL, 0) + ' l' : '–'], ['Venku', L.outT != null ? fmt(L.outT, 0) + ' °C' : '–'],
-      ['Průměr', (() => { const list = HIST.trips.filter(t => t.car === c.id && t.km > 5); const km = list.reduce((s, t) => s + t.km, 0), f = list.reduce((s, t) => s + t.fuel, 0); return km > 0 ? fmt(f / km * 100, 1) + ' l/100' : '–'; })()],
-      ['Najeto', fmt(HIST.trips.filter(t => t.car === c.id).reduce((s, t) => s + t.km, 0), 0) + ' km']].filter(r => !cObd || r[1] !== '–' || r[0].startsWith('Palivo') || r[0] === 'Průměr')) +
-    '<p class="note mono" style="margin:8px 0 0;word-break:break-word">' + esc(c.ecu || '') + (c.clu ? '<br>' + esc(c.clu) : '') + '</p></div>';
-  const tests = TESTS.filter(t => c.tests && c.tests[t.id]);
-  h += '<div class="lbl2">Poslední výsledky testů</div>' + (tests.length ? '<div class="card">' + tests.map(t => { const r = c.tests[t.id]; return '<div class="switch"><span class="sw-t">' + t.name + '<small>' + dateTxt(r.t) + ' · ' + esc(r.sum) + '</small></span>' + gradeHTML(r) + '</div>'; }).join('') + '</div>' : '<p class="note">Zatím žádný test. Najdeš je v záložce Testy.</p>');
-  const acc = Object.keys(c.acc || {});
-  if (acc.length) h += '<div class="lbl2">Nejlepší časy</div><div class="card">' + kvRows(acc.map(m => [m.replace('-', '–') + ' km/h', fmt(c.acc[m].best, 2) + ' s'])) + '</div>';
-  const fe = c.faults && c.faults.eng, fc = c.faults && c.faults.clu;
-  if (fe || fc) h += '<div class="lbl2">Chybové kódy</div><div class="card">' + [['Motor', fe], ['Přístroje', fc]].filter(x => x[1]).map(x => '<div class="switch"><span class="sw-t">' + x[0] + '<small>' + dateTxt(x[1].t) + ' ' + timeTxt(x[1].t) + '</small></span><b>' + (x[1].list.length ? x[1].list.length + '× ' + x[1].list.slice(0, 3).map(f => String(f.c).padStart(5, '0')).join(', ') : 'žádné') + '</b></div>').join('') + '</div>';
-  const trips = HIST.trips.filter(t => t.car === c.id).slice(0, 40);
-  h += '<div class="lbl2">Jízdy</div>' + (trips.length ? '<div class="list">' + trips.map(t => '<button class="item" data-trip="' + t.id + '"><div class="tx"><div class="tt">' + dateTxt(t.start) + ' · ' + timeTxt(t.start) + '</div><div class="ds">' + fmt(t.km, 1) + ' km · ' + durTxt(t.end - t.start) + ' · ' + (t.avg != null ? fmt(t.avg, 1) + ' l/100' : fmt(t.fuel, 2) + ' l') + ' · max ' + fmt(t.maxBoost, 2) + ' bar</div>' +
-    (openTrip === t.id ? kvRows([['Spotřebováno' + (cObd ? ' ≈' : ''), fmt(t.fuel, 2) + ' l'], ['Cena', fmt(t.cost, 0) + ' Kč'], ['Max otáčky', fmt(t.maxRpm, 0)], ['Max rychlost', fmt(t.maxSpd, 0) + ' km/h'], ['Max voda', t.maxCool ? fmt(t.maxCool, 0) + ' °C' : '–'], cObd ? ['Max zatížení', t.maxLoad != null ? fmt(t.maxLoad, 0) + ' %' : '–'] : ['Max vstřik', fmt(t.maxIq, 1) + ' mg'], cObd ? null : ['Nejbohatší směs', t.minAfr != null ? fmt(t.minAfr, 1) + ':1' : '–'], ['Zahřátí na 80 °C', t.warmSec != null ? durTxt(t.warmSec * 1000) : '–'], ['Napětí za chodu', t.voltAvg != null ? fmt(t.voltAvg, 1) + ' V' : '–'], cObd ? null : ['Stav km na začátku', t.odo0 != null ? fmt(t.odo0, 0) : '–']].filter(Boolean)) + (t.hasTrk ? '<span class="btn small" role="button" data-route="' + t.id + '" style="margin-top:8px">Zobrazit trasu</span>' : '') : '') +
-    '</div><span class="chev">' + (openTrip === t.id ? ICON.up : ICON.down) + '</span></button>').join('') + '</div>' : '<p class="note">Zatím žádná uložená jízda (ukládají se jízdy delší než minuta).</p>');
-  h += '<div style="margin-top:18px"><button class="btn ghost wide" id="btnDelCar">' + (Date.now() - delArm < 4000 ? 'Opravdu smazat historii tohoto auta?' : 'Smazat historii tohoto auta') + '</button></div>';
-  $('tripBody').innerHTML = h;
-  $('tripBody').querySelectorAll('[data-car]').forEach(b => b.onclick = () => { histCar = b.dataset.car; openTrip = null; renderHistory(); });
-  $('tripBody').querySelectorAll('[data-trip]').forEach(b => b.onclick = () => { openTrip = openTrip === +b.dataset.trip ? null : +b.dataset.trip; renderHistory(); });
-  $('tripBody').querySelectorAll('[data-route]').forEach(b => b.onclick = e => { e.stopPropagation(); openTripRoute(+b.dataset.route); });
-  $('carName').onchange = e => { c.name = e.target.value.trim().slice(0, 24) || c.name; saveHist(true); };
-  $('btnDelCar').onclick = () => {
-    if (Date.now() - delArm < 4000) { delete HIST.cars[c.id]; HIST.trips = HIST.trips.filter(t => t.car !== c.id); saveHist(true); delArm = 0; histCar = null; renderHistory(); showToast('Historie smazána'); }
-    else { delArm = Date.now(); renderHistory(); setTimeout(() => { if (tripMode === 'hist' && curView === 'trip') renderHistory(); }, 4100); }
-  };
 }

@@ -437,3 +437,52 @@ details.raw{margin-top:12px} details.raw summary{color:var(--muted);font-size:13
 .sndwhen{padding:2px 0 8px 12px;font-size:12px;color:var(--muted);line-height:1.4;border-bottom:1px solid var(--sep)}
 .switch + .sndwhen{margin-top:-6px}
 .cmpna{font-size:11.5px;color:var(--muted);font-family:var(--body);font-weight:500}
+/* Cesta → Historie */
+.hseg{margin:4px 0 10px}
+.hseg button{font-size:14px;padding:8px 2px}
+.hday{font-family:var(--cond);font-size:13px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin:14px 2px 6px}
+.hev{background:var(--tile);box-shadow:var(--tileshine);border:1px solid var(--line);border-radius:14px;margin-bottom:8px;overflow:hidden}
+.hevh{display:flex;align-items:center;gap:10px;width:100%;padding:11px 12px;text-align:left}
+.hevh .tx{flex:1;min-width:0}
+.hevh .tt{display:block;font-family:var(--cond);font-size:16.5px;font-weight:700;line-height:1.2}
+.hevh .ds{display:block;font-size:12.5px;color:var(--muted);margin-top:2px;line-height:1.35;overflow-wrap:anywhere}
+.hevh .hr{display:flex;flex-direction:column;align-items:flex-end;gap:4px;flex:none}
+.hevh .hr small{font-family:var(--mono);font-size:11px;color:var(--faint)}
+.hevh .hr .verdict{font-size:12.5px;padding:2px 8px}
+.hevh .chev{color:var(--faint);flex:none;transition:transform .15s}
+.hevh .chev svg{width:16px;height:16px}
+.hev.open .hevh .chev{transform:rotate(180deg)}
+.hevb{padding:2px 12px 12px;border-top:1px solid var(--sep)}
+.hevb .lbl2{margin-top:12px}
+.hico{flex:none;width:34px;height:34px;border-radius:10px;display:grid;place-items:center;background:var(--panel2);border:1px solid var(--line);color:var(--info)}
+.hico svg{width:19px;height:19px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.h-fill{color:var(--warn)}
+.h-acc{color:var(--accent)}
+.h-ok,.h-g-ok,.h-g-top{color:var(--ok)}
+.h-bad,.h-g-bad{color:var(--bad)}
+.h-g-mid{color:var(--warn)}
+.h-g-none{color:var(--muted)}
+.htab{width:100%;border-collapse:collapse;font-size:13px;margin-top:4px}
+.htab th{font-weight:500;color:var(--faint);font-size:11px;text-align:right;padding:4px 6px;text-transform:uppercase;letter-spacing:.04em}
+.htab td{padding:6px;border-bottom:1px solid var(--sep);text-align:right;font-family:var(--cond);font-size:15px;font-weight:700;font-variant-numeric:tabular-nums;white-space:nowrap;vertical-align:top}
+.htab td:first-child{text-align:left;font-family:var(--body);font-size:13px;font-weight:500;white-space:normal}
+.htab td small{display:block;color:var(--faint);font-family:var(--body);font-size:10.5px;font-weight:400}
+.htab td:first-child small{display:inline}
+.htab tr:last-child td{border-bottom:0}
+.hvals td:first-child{padding-left:12px}
+.hvals td:last-child{padding-right:12px}
+.hvals tr[data-val]{cursor:pointer}
+.hflt{display:flex;align-items:flex-start;gap:10px;padding:8px 0;border-bottom:1px solid var(--sep)}
+.hflt>b{flex:none;font-size:13.5px;padding-top:1px}
+.hflt>span{flex:1;min-width:0;font-size:14px}
+.hflt>span small{display:block;color:var(--muted);font-size:12px;margin-top:2px}
+.hnew{flex:none;font-size:11px;font-family:var(--cond);font-weight:700;color:var(--bad);border:1px solid var(--badline);border-radius:999px;padding:1px 7px}
+.hst{flex:none;font-style:normal;font-size:12px;font-family:var(--cond);font-weight:700;border-radius:999px;padding:2px 8px;white-space:nowrap}
+.hst.bad{color:var(--bad);border:1px solid var(--badline)}
+.hst.ok{color:var(--ok);border:1px solid var(--line)}
+.hunit{display:flex;justify-content:space-between;align-items:baseline;margin-top:6px}
+.hunit b{font-family:var(--cond);font-size:16px}
+.hunit small{color:var(--muted);font-size:12px}
+.hchart{width:100%;height:150px;display:block;background:var(--panel2);border:1px solid var(--line);border-radius:12px}
+.hax{fill:var(--faint);font-size:10px;font-family:var(--mono)}
+.htab th:first-child{text-align:left}
