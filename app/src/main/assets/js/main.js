@@ -45,7 +45,7 @@ function obdPlan(){
   else if (curView === 'drive' && PAGES[curPage].layout === 'health') ids = ['boost', 'cool', 'volt', 'load', 'iat'];
   else if (curView === 'charts') ids = ['boost', 'rpm', 'cool', 'load', 'mafGs', 'ped'];
   else if (curView === 'more' && moreSub === 'groups') ids = VAL.filter(v => v.pid).map(v => v.id);
-  else if (curView === 'trip') ids = ['rpm', 'spd', 'cons', 'cool', 'boost'];
+  else if (curView === 'trip') ids = ['rpm', 'spd', 'cons', 'cool', 'boost', 'mafGs'];
   else ids = effVals(PAGES[curPage]);
   /* always in the background: revs, speed and what the consumption is counted from (the trip and tank need it all the time) */
   const main = pidsFor(ids), bg = pidsFor(['rpm', 'cons', 'spd', 'cool']).filter(p => !main.includes(p));
@@ -62,7 +62,7 @@ function currentPlan(){
   if (curView === 'drive' && PAGES[curPage].layout === 'health' && !D.hud) return buildPlan(groupsFor(['boost', 'maf', 'cool', 'volt']));
   if (D.hud) return buildPlan(groupsFor(D.hud.vals));
   if (curView === 'charts') return buildPlan(groupsFor(['boost', 'maf', 'iq', 'rpm', 'cool']));
-  if (curView === 'trip') return buildPlan(groupsFor(['iq', 'rpm', 'cool']));
+  if (curView === 'trip') return buildPlan(groupsFor(['iq', 'rpm', 'cool', 'maf', 'boost']));
   const p = PAGES[curPage], gs = groupsFor(p.vals);
   const mainG = (p.layout === 'dial' || p.layout === 'big') ? groupsFor([p.vals[0]])[0] : null;
   return buildPlan(gs, mainG);

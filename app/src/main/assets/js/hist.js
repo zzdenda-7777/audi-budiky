@@ -5,7 +5,7 @@
 
 let histTab = 'all', histShow = 50;
 const HEV = {};                                   // rendered events by key, for expanding in place
-const HTABS = [['all', 'Vše'], ['trips', 'Jízdy'], ['tests', 'Testy'], ['faults', 'Chyby'], ['vals', 'Hodnoty']];
+const HTABS = [['all', 'Vše'], ['trips', 'Jízdy'], ['tests', 'Testy'], ['faults', 'Chyby'], ['vals', 'Hodnoty'], ['facts', 'Fakta']];
 const HICON = {
   trip: '<path d="M4 16.5h16M5.5 16.5l1.6-5.2a2 2 0 0 1 1.9-1.4h6a2 2 0 0 1 1.9 1.4l1.6 5.2"/><circle cx="8" cy="17" r="1.8"/><circle cx="16" cy="17" r="1.8"/>',
   test: '<path d="M9 3h6M10 3v6.5L5 18a2 2 0 0 0 1.7 3h10.6A2 2 0 0 0 19 18l-5-8.5V3"/><path d="M7.5 15h9"/>',
@@ -96,7 +96,8 @@ function valsTable(st){
 function evBody(e, c){
   if (e.type === 'trip') {
     const t = e.tr, obd = t.prof ? (PROFILES[t.prof] || {}).proto === 'obd' : carIsObd(c);
-    return kvRows(tripRows(t, obd)) + '<div class="lbl2">Všechny hodnoty</div>' + valsTable(t.st) +
+    const fl = t.fx ? factsList(t.fx, t.km, t.fuel, t.cost, PROFILES[t.prof] || PROFILES[c.profile]) : [];
+    return kvRows(tripRows(t, obd)) + (fl.length ? '<div class="lbl2">Zajímavosti</div>' + factsHTML(fl) : '') + '<div class="lbl2">Všechny hodnoty</div>' + valsTable(t.st) +
       (t.hasTrk ? '<button class="btn small" data-route="' + t.id + '" style="margin-top:10px">Zobrazit trasu na mapě</button>' : '');
   }
   if (e.type === 'test') {
@@ -238,7 +239,7 @@ function renderHistory(){
   let h = cars.length > 1 ? '<div class="chips" style="margin-bottom:10px">' + cars.map(x => '<button class="chip' + (x.id === histCar ? ' on' : '') + '" data-car="' + esc(x.id) + '">' + esc(x.name) + '</button>').join('') + '</div>' : '';
   h += histHeader(c);
   h += '<div class="seg hseg" id="hTabs">' + HTABS.map(t => '<button data-h="' + t[0] + '"' + (t[0] === histTab ? ' class="on"' : '') + '>' + t[1] + '</button>').join('') + '</div><div id="hBody">';
-  h += histTab === 'trips' ? tabTrips(c) : histTab === 'tests' ? tabTests(c) : histTab === 'faults' ? tabFaults(c) : histTab === 'vals' ? tabVals(c) : timelineHTML(histEvents(c), c);
+  h += histTab === 'trips' ? tabTrips(c) : histTab === 'tests' ? tabTests(c) : histTab === 'faults' ? tabFaults(c) : histTab === 'vals' ? tabVals(c) : histTab === 'facts' ? tabFacts(c) : timelineHTML(histEvents(c), c);
   h += '</div><div class="row" style="gap:8px;margin-top:18px"><button class="btn" id="hExp" style="flex:1">Poslat celou historii</button><button class="btn" id="hSave" style="flex:1">Uložit do telefonu</button></div>' +
     '<div style="margin-top:10px"><button class="btn ghost wide" id="btnDelCar">' + (Date.now() - delArm < 4000 ? 'Opravdu smazat historii tohoto auta?' : 'Smazat historii tohoto auta') + '</button></div>';
   const body = $('tripBody'); body.innerHTML = h;
@@ -286,6 +287,12 @@ function histText(c){
   if ((c.fuelLog || []).length) {
     L.push('', '== TANKOVÁNÍ ==');
     c.fuelLog.forEach(x => L.push(new Date(x.t).toLocaleString('cs-CZ') + ' · ' + ({ full: 'do plna', part: 'část', set: 'stav nádrže' })[x.mode] + ' ' + fmt(x.l, 1) + ' l' + (x.before != null ? ', před tím ≈ ' + fmt(x.before, 1) + ' l' : '')));
+  }
+  const fxT = tr.filter(t => t.fx);
+  if (fxT.length) {
+    const F = factsAdd(fxT.map(t => t.fx));
+    L.push('', '== FAKTA ZA ' + fxT.length + ' ' + czPl(fxT.length, 'JÍZDU', 'JÍZDY', 'JÍZD') + ' ==');
+    factsList(F, fxT.reduce((s, t) => s + t.km, 0), fxT.reduce((s, t) => s + (t.fuel || 0), 0), fxT.reduce((s, t) => s + (t.cost || 0), 0), PROFILES[c.profile]).forEach(f => L.push(f[1] + ': ' + f[0].replace(/\u00a0/g, ' ') + (f[2] ? ' – ' + f[2] : '')));
   }
   L.push('', '== JÍZDY (' + tr.length + ') ==');
   tr.forEach(t => {

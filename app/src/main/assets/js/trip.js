@@ -78,7 +78,7 @@ function tripSummary(t){
   return { id: t.id, car: t.car, start: t.start, end: t.last, km: +t.km.toFixed(2), fuel: +t.fuel.toFixed(3), avg: t.km > 0.5 ? +(t.fuel / t.km * 100).toFixed(2) : null,
     cost: +(t.fuel * CFG.price).toFixed(1), maxLoad: t.maxLoad != null ? Math.round(t.maxLoad) : null, maxBoost: t.maxBoost, maxRpm: t.maxRpm, maxSpd: t.maxSpd, maxCool: t.maxCool, maxIq: t.maxIq, minAfr: t.minAfr, odo0: t.odo0,
     maxFuelT: t.maxFuelT || null, maxIat: t.maxIat, voltAvg: t.voltN ? +(t.voltSum / t.voltN).toFixed(2) : null, warmSec: t.warmSec, rateAvg: t.rateN ? +(t.rateSum / t.rateN).toFixed(1) : null, hasTrk: !!t.hasTrk, price: CFG.price,
-    prof: PROFILE.id, st: statsSummary(t.st) };
+    prof: PROFILE.id, st: statsSummary(t.st), fx: factsSummary(t.fx) };
 }
 /* every value shown in the app, sampled once a second while connected: per trip [n, sum, min, max], per car last value and all-time low/high */
 const HIST_SKIP = new Set(['dist', 'cost', 'avg', 'range', 'rate']);
@@ -153,6 +153,7 @@ function tripTick(dt){
   const vo = fresh('volt', 10000), rp = fresh('rpm', 3000) || 0; if (vo != null && rp > 700) { TRIP.voltSum = (TRIP.voltSum || 0) + vo; TRIP.voltN = (TRIP.voltN || 0) + 1; }
   const rr = readRate(); if (rr) { TRIP.rateSum = (TRIP.rateSum || 0) + rr; TRIP.rateN = (TRIP.rateN || 0) + 1; }
   if (Date.now() - (TRIP.sT || 0) >= 1000) { TRIP.sT = Date.now(); histSample(); }
+  factsTick(dt);
   TRIP.last = Date.now();
   if (Date.now() - tripSaveT > 20000) { tripSaveT = Date.now(); saveTrip(); if (CAR) { const cc = carObj(CAR); cc.seen = Date.now(); if (fresh('cool', 10000) != null) cc.last.cool = fresh('cool', 10000); if (fuelNow() != null) cc.last.fuelL = fuelNow(); if (cc.last.odo != null && TRIP.odo0 != null) cc.last.odoNow = TRIP.odo0 + TRIP.km; saveHist(); } }
 }
@@ -225,7 +226,9 @@ function renderTripView(full){
   h += '<div class="card"><h3>Přístrojový panel <button class="btn small" id="btnClu"' + (S.state === 'live' ? '' : ' disabled') + '>Načíst znovu</button></h3>' + kvRows([
     ['Venku', fmt(any('outT'), 0) + ' °C'], ['Palivo (panel)', fmt(any('fuelL'), 0) + ' l'], ['Stav km', fmt(any('odo'), 0)], ['Olej', S.cluHasOil ? fmt(any('oilT'), 0) + ' °C' : 'nehlásí']
   ]) + '<p class="note" style="margin:8px 0 0">Panel se čte jen při připojení – motor pak běží živě bez přerušení. „Načíst znovu“ motor přeruší asi na 5 s.</p></div>';
+  h += factsCardHTML();
   $('tripBody').innerHTML = h;
+  if ($('btnFacts')) $('btnFacts').onclick = openFactsSheet;
   $('btnNewTrip').onclick = () => { endTrip(); renderTripView(true); showToast('Nová jízda začala'); };
   $('btnClu').onclick = () => { if (A && A.readClusterNow) { unitJob('cluster', CLU); showToast('Čtu panel…'); } };
 }
@@ -253,7 +256,9 @@ function renderTripObd(){
     ['Max otáčky', T ? fmt(T.maxRpm, 0) : '–'], ['Max rychlost', T ? fmt(T.maxSpd, 0) + ' km/h' : '–'],
     ['Max voda', T && T.maxCool ? fmt(T.maxCool, 0) + ' °C' : '–'], ['Max zatížení', T && T.maxLoad != null ? fmt(T.maxLoad, 0) + ' %' : '–']
   ]) + (speed() == null ? '<p class="note" style="margin:8px 0 0">Kilometry a l/100 km jdou z GPS nebo z rychlosti auta – zapni GPS ve Více → Nastavení.</p>' : '') + '</div>';
+  h += factsCardHTML();
   $('tripBody').innerHTML = h;
+  if ($('btnFacts')) $('btnFacts').onclick = openFactsSheet;
   $('btnNewTrip').onclick = () => { endTrip(); renderTripView(true); showToast('Nová jízda začala'); };
   $('btnFill').onclick = openFillSheet;
 }

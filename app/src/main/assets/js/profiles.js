@@ -8,10 +8,14 @@
    with what the engine unit itself requests, which does not depend on them. */
 const PROFILES = {
   a4v6: { id: 'a4v6', say: 'Áčtyřka', name: 'Audi A4 B6 2.5 TDI V6 (2003)', short: 'A4 2.5 TDI', engine: 'BDG · 120 kW · 310 Nm · VP44 · manuál 6 st. · přední pohon', cyl: 6, kw: 120, nm: 310, mass: 1570, consTyp: 7.2,
+    /* engine geometry and tyres for the trip facts: 24 valves (4 per cylinder), bore × stroke 78.3 × 86.4 mm */
+    valves: 24, bore: 78.3, stroke: 86.4, tire: '205/55 R16', tireC: 1.95,
     gear: 'manual', smooth: [1.5, 2.5], mafMin: [800, 750], mafNote: 'orientačně – pro BDG VW hodnotu nezveřejňuje', mafIdle: null, idle: [700, 950],
     boost: [1900, 2300], boostAct: null, iqIdle: [2, 9], iqFull: [40, 48], acc0100: 8.9, pump: 'VP44', n75: [45, 95],
     src: { smooth: 'VW', acc0100: 'výrobce', kw: 'výrobce', iqIdle: 'VW (TDI obecně)', cool: 'VW' } },
   a6r4: { id: 'a6r4', say: 'Ášestka', name: 'Audi A6 C5 1.9 TDI (1998)', short: 'A6 1.9 TDI', engine: 'AFN · 81 kW · 235 Nm · čerpadlo VE · manuál 5 st.', cyl: 4, kw: 81, nm: 235, mass: 1500, consTyp: 6.0,
+    /* 8 valves (2 per cylinder), bore × stroke 79.5 × 95.5 mm */
+    valves: 8, bore: 79.5, stroke: 95.5, tire: '205/55 R16', tireC: 1.95,
     gear: 'manual', smooth: [2.0, 3.0], mafMin: [850, 800], mafNote: 'Hella 850–1050 mg, VW minimum 800 mg', mafIdle: [230, 450], idle: [840, 945],
     boost: [1900, 2000], boostAct: [1750, 2250], iqIdle: [2.2, 9], iqFull: [40, 45], acc0100: 12.6, pump: 'VE', n75: [45, 95],
     n108: [2, 98], soiFull: [6, 14], g149: [1.45, 1.90],
@@ -21,6 +25,8 @@ const PROFILES = {
      common rail Bosch EDC16C34 or Siemens SID80x. Torque 150 Nm as in the owner's papers (catalogues differ: 150–160 Nm). */
   p206: { id: 'p206', say: 'Dvěstěšestka', proto: 'obd', make: 'Peugeot', name: 'Peugeot 206 1.4 HDi eco 70 (2005)', short: '206 1.4 HDi',
     engine: '8HZ (DV4TD) · 50 kW · 150 Nm · common rail · manuál 5 st. · Bluetooth OBD', cyl: 4, kw: 50, nm: 150, mass: 1060, tank: 50, consTyp: 4.8,
+    /* 8 valves (2 per cylinder), bore × stroke 73.7 × 82.0 mm */
+    valves: 8, bore: 73.7, stroke: 82.0, tire: '175/65 R14', tireC: 1.79,
     gear: 'manual', smooth: [2.0, 3.0], mafMin: [0, 0], mafNote: '', mafIdle: null, idle: [750, 900], boost: [0, 0], boostAct: null,
     boostMax: [0.5, 1.0], iqIdle: [2, 9], iqFull: [0, 0], acc0100: 13.1, pump: 'common rail', n75: [45, 95],
     /* full-load injection (mg/stroke) by revs, from the torque curve (150 Nm at 1750, 50 kW at 4000): used with the
