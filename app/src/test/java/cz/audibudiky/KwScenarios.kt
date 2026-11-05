@@ -72,6 +72,7 @@ object KwScenarios {
     }
 
     fun lostByteMidRead(): String = withCar { car, k, _ ->
+        car.maxRepeats = 0          // a unit that gives up instead of repeating the block
         k.connect(0x01, 9600)
         repeat(5) { k.readGroup(1) }
         car.dropAfterBytes = 7
@@ -85,6 +86,7 @@ object KwScenarios {
     /** Same logic as the app: after a drop, wait and try again until the unit answers. */
     fun recoverAfterDropWithLockout(): String = withCar { car, k0, rx ->
         car.lockoutMs = 8000
+        car.maxRepeats = 0
         k0.connect(0x01, 9600)
         car.dropAfterBytes = 3
         try { repeat(10) { k0.readGroup(1) } } catch (e: IOException) { }
@@ -137,7 +139,56 @@ object KwScenarios {
         "po řádném ukončení (např. čtení panelu) se motor znovu připojí"
     }
 
+    /** The unit repeats a block whose byte we never saw: read on without dropping the connection. */
+    fun repeatedBlock(): String = withCar { car, k, _ ->
+        k.connect(0x01, 9600)
+        repeat(3) { k.readGroup(1) }
+        car.dropAfterBytes = 7
+        val f = k.readGroup(1) ?: throw AssertionError("skupina 1 null")
+        check(Math.abs((f[0].value ?: 0.0) - 800.0) < 0.01, "po opakovaném bloku špatné hodnoty: ${f.map { it.value }}")
+        repeat(20) { check(k.readGroup(11) != null, "čtení po opakovaném bloku") }
+        check(car.repeats >= 1 && k.repeatedBlocks >= 1, "jednotka měla blok zopakovat (${car.repeats}) a aplikace navázat (${k.repeatedBlocks})")
+        check(car.aborts == 0, "spojení nesmí spadnout: ${car.lastAbort}")
+        "jednotka zopakovala blok ${car.repeats}×, aplikace navázala, hodnoty sedí, spojení drží"
+    }
+
+    /** Like the log from the A4: the phone loses single bytes from the cable. Count how much gets through. */
+    private fun lossyRun(echoLoss: Double, rxLoss: Double, n: Int): String = withCar { car, k0, rx ->
+        car.echoLoss = echoLoss; car.rxLoss = rxLoss; car.lockoutMs = 3000
+        var k = k0
+        var ok = 0; var bad = 0; var reconnects = 0; var wrong = 0
+        k.connect(0x01, 9600)
+        val t0 = Clock.now()
+        val plan = intArrayOf(1, 11, 3, 1)
+        var i = 0
+        while (i < n && Clock.now() - t0 < 120000) {
+            try {
+                val g = plan[i % plan.size]
+                val f = k.readGroup(g)
+                if (f == null || f.size != 4) wrong++
+                else if (g == 1 && Math.abs((f[0].value ?: 0.0) - 800.0) > 0.01) wrong++
+                else ok++
+                i++
+            } catch (e: IOException) {
+                bad++; reconnects++
+                var up = false
+                while (!up && Clock.now() - t0 < 120000) {
+                    Clock.sleep(2500)
+                    k = Kw1281(car, rx) { synchronized(traceLog) { traceLog.add(it) } }
+                    try { k.connect(0x01, 9600); up = true } catch (x: IOException) { }
+                }
+            }
+        }
+        check(wrong == 0, "přečteno $wrong špatných hodnot – nesmí se stát")
+        check(ok >= n * 0.97, "prošlo jen $ok z $n čtení ($reconnects× nové spojení)")
+        check(reconnects <= n / 100, "moc nových spojení: $reconnects")
+        "ztráta echa ${(echoLoss * 100).toInt()} %, bajtů jednotky ${(rxLoss * 100).toInt()} %: $ok/$n čtení OK, nové spojení $reconnects×, ztraceno na telefonu ${car.lostOnPhone} bajtů, jednotka opakovala blok ${car.repeats}×"
+    }
+
     val ALL: List<Pair<String, () -> String>> = listOf(
+        "Jednotka zopakuje blok" to ::repeatedBlock,
+        "Ztracená echa (2 %)" to { lossyRun(0.02, 0.0, 300) },
+        "Ztracené bajty z kabelu (1 % echa + 1 % jednotky)" to { lossyRun(0.01, 0.01, 300) },
         "Zkreslení rychlosti jako v autě" to ::garbleMatchesRealCar,
         "Připojení: jednotka 9600, start 10400" to ::connect9600FromWrongBaud,
         "Čtení skupin a hodnot" to ::readGroupsAndValues,

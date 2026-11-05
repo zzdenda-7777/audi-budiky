@@ -15,6 +15,7 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.hardware.usb.UsbDeviceConnection
+import android.hardware.usb.UsbEndpoint
 import android.hardware.usb.UsbManager
 import android.location.Location
 import android.location.LocationListener
@@ -983,6 +984,48 @@ class MainActivity : Activity() {
     }
     private fun emitNa(pid: Int) { js("onPid", JSONObject().put("p", pid).put("na", true).toString()) }
 
+    /**
+     * Reads an FTDI cable (the usual KKL) directly with one blocking transfer after another. Nothing gets cancelled
+     * half-way, so the reading itself can't lose a byte, and one failed transfer ("USB get_status request failed",
+     * seen on a Xiaomi with Android 16) doesn't leave the app deaf for the rest of the session.
+     * Every 64-byte packet starts with 2 status bytes; the second one reports the chip's own overruns.
+     */
+    private class FtdiReader(private val conn: UsbDeviceConnection, private val ep: UsbEndpoint,
+                             private val rx: LinkedBlockingDeque<Int>, private val trace: (String) -> Unit) {
+        @Volatile private var on = true
+        @Volatile var errors = 0; private set
+        @Volatile var overruns = 0; private set
+        private val t = Thread({
+            try { android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_URGENT_AUDIO) } catch (_: Exception) { }
+            val mps = ep.maxPacketSize.coerceAtLeast(8)
+            val buf = ByteArray(mps * 4)
+            var bad = 0
+            while (on) {
+                // the chip answers every millisecond (latency timer 1 ms), so 500 ms only runs out when it is gone
+                val n = try { conn.bulkTransfer(ep, buf, buf.size, 500) } catch (_: Exception) { -1 }
+                if (!on) break
+                if (n < 0) {
+                    errors++; bad++
+                    if (bad == 1 || errors % 50 == 0) trace("čtení z kabelu vynechalo (${errors}×), čtu dál")
+                    if (bad >= 20) { trace("kabel přestal odpovídat"); break }
+                    SystemClock.sleep(5); continue
+                }
+                bad = 0
+                var p = 0
+                while (p < n) {
+                    val end = minOf(p + mps, n)
+                    if (end - p >= 2) {
+                        if ((buf[p + 1].toInt() and 0x02) != 0) { overruns++; if (overruns <= 3 || overruns % 50 == 0) trace("kabel: přetečení bufferu (${overruns}×)") }
+                        for (i in p + 2 until end) rx.addLast(buf[i].toInt() and 0xFF)
+                    }
+                    p = end
+                }
+            }
+        }, "ftdi-read").apply { isDaemon = true }
+        fun start() = t.start()
+        fun stop() { on = false }
+    }
+
     /** The USB cable as a K-line for the protocol. */
     private class UsbKLine(private val port: UsbSerialPort) : KLine {
         override fun write(b: Int) { port.write(byteArrayOf(b.toByte()), 200) }
@@ -1064,19 +1107,36 @@ class MainActivity : Activity() {
 
     private fun session(port: UsbSerialPort, conn: UsbDeviceConnection) {
         var io: SerialInputOutputManager? = null
+        var ftdiRx: FtdiReader? = null
         try { android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_URGENT_AUDIO) } catch (_: Exception) { }
         try {
             port.open(conn)
             port.setParameters(10400, 8, UsbSerialPort.STOPBITS_1, UsbSerialPort.PARITY_NONE)
-            try { (port as? FtdiSerialDriver.FtdiSerialPort)?.setLatencyTimer(1) } catch (_: Exception) { }
+            val ftdi = port as? FtdiSerialDriver.FtdiSerialPort
+            var lat = -1
+            if (ftdi != null) {
+                try { ftdi.setLatencyTimer(1) } catch (e: Exception) { trace("latenci kabelu nejde nastavit: ${e.message}") }
+                lat = try { ftdi.latencyTimer } catch (_: Exception) { -1 }
+            }
             try { port.setDTR(true); port.setRTS(false) } catch (_: Exception) { }
             val rx = LinkedBlockingDeque<Int>()
-            io = SerialInputOutputManager(port, object : SerialInputOutputManager.Listener {
-                override fun onNewData(data: ByteArray) { for (b in data) rx.addLast(b.toInt() and 0xFF) }
-                override fun onRunError(e: Exception) { if (running) trace("čtení z kabelu skončilo: ${e.message}") }
-            })
-            io.start()
-            trace("kabel $cableInfo otevřen")
+            if (ftdi != null) {
+                ftdiRx = FtdiReader(conn, port.readEndpoint, rx) { trace(it) }.also { it.start() }
+            } else {
+                // other chips: the library's reader, started again whenever it stops on a failed read
+                lateinit var listener: SerialInputOutputManager.Listener
+                listener = object : SerialInputOutputManager.Listener {
+                    override fun onNewData(data: ByteArray) { for (b in data) rx.addLast(b.toInt() and 0xFF) }
+                    override fun onRunError(e: Exception) {
+                        if (!running) return
+                        trace("čtení z kabelu vynechalo: ${e.message}, čtu dál")
+                        SystemClock.sleep(20)
+                        if (running) try { io = SerialInputOutputManager(port, listener).also { it.start() } } catch (x: Exception) { trace("čtení z kabelu nejde obnovit: ${x.message}") }
+                    }
+                }
+                io = SerialInputOutputManager(port, listener).also { it.start() }
+            }
+            trace("kabel $cableInfo otevřen" + (if (ftdi != null) ", čtu přímo, latence ${if (lat >= 0) "$lat ms" else "?"}" else ""))
             val line = UsbKLine(port)
 
             var clusterDone = !clusterOnConnect
@@ -1120,13 +1180,14 @@ class MainActivity : Activity() {
                         val t0 = SystemClock.elapsedRealtime()
                         val fields = k.readGroup(g)
                         val ms = SystemClock.elapsedRealtime() - t0
-                        trace("skupina %03d %s %d ms".format(g, if (fields == null) "není" else "OK", ms))
+                        trace("skupina %03d %s %d ms".format(g, if (fields == null) "není" else "OK", ms) + (if (k.recovered > 0 && i % 50 == 0) " · zachráněno: echo ${k.lostEchoes}, potvrzení ${k.lostAcks}, blok znovu ${k.repeatedBlocks}, konec ${k.lostEnds}" else ""))
                         if (fields != null) recorder.write(address, g, fields)
                         emit(address, g, fields, ms)
                     }
                     k.end()
                 } catch (e: Exception) {
                     if (!running) break
+                    if (k.recovered > 0) trace("na lince zachráněno: echo ${k.lostEchoes}, potvrzení ${k.lostAcks}, blok znovu ${k.repeatedBlocks}, konec ${k.lostEnds}")
                     if (e is BaudMismatch) engineBaud = e.suggested
                     failures++
                     when {
@@ -1150,6 +1211,7 @@ class MainActivity : Activity() {
         } catch (e: Exception) {
             error("usb", "Chyba kabelu: ${e.message}")
         } finally {
+            ftdiRx?.stop()
             try { io?.stop() } catch (_: Exception) { }
             try { port.close() } catch (_: Exception) { }
             running = false

@@ -57,6 +57,15 @@ class Kw1281(
     var connectedBaud = 0
         private set
 
+    /* What went wrong on the line and was recovered from (shown in the log). Seen in a real car with a phone that
+       drops single bytes coming from the cable: the echo of our byte or one of the unit's bytes simply never arrives. */
+    var lostEchoes = 0; private set
+    var lostAcks = 0; private set
+    var repeatedBlocks = 0; private set
+    var lostEnds = 0; private set
+    val recovered get() = lostEchoes + lostAcks + repeatedBlocks + lostEnds
+    private fun note(n: Int, msg: String) { if (n <= 3 || n % 25 == 0) trace("$msg (${n}×)") }
+
     private fun hex(b: Int) = "%02X".format(b and 0xFF)
 
     fun readByte(timeoutMs: Int = 1000): Int =
@@ -79,27 +88,25 @@ class Kw1281(
         val v = b and 0xFF
         port.write(v)
         if (echo == false) return
-        try {
-            val e = readByte(if (echo == null) 300 else 600)
-            if (e == v) {
-                echo = true
-            } else {
-                rx.addFirst(e)
-                if (echo == null) {
-                    echo = false
-                    trace("kabel nevrací echo")
-                } else {
-                    throw IOException("Kabel vrátil jiné echo (${hex(e)} místo ${hex(v)}), rušení na lince?")
-                }
-            }
-        } catch (ex: IOException) {
-            if (echo == null) {
-                echo = false
-                trace("kabel nevrací echo")
-            } else {
-                throw ex
-            }
+        val e = try { readByte(if (echo == null) 300 else 400) } catch (ex: IOException) { null }
+        if (e == v) { echo = true; return }
+        if (echo == null) {
+            if (e != null) rx.addFirst(e)
+            echo = false
+            trace("kabel nevrací echo")
+            return
         }
+        // A late byte from before (a confirmation we stopped waiting for) may sit in front of our echo.
+        if (e != null) {
+            val n = try { readByte(5) } catch (ex: IOException) { null }
+            if (n == v) return
+            if (n != null) rx.addFirst(n)
+            rx.addFirst(e)
+        }
+        // The cable echoes, but this echo got lost on the way to the phone. Whatever came instead is already
+        // the unit's answer (it only answers after it got our byte), so leave it for the next read and carry on.
+        // If the unit in fact missed our byte, it sends its block again and receiveBlock() picks it up.
+        note(++lostEchoes, "ztracené echo " + (if (e != null) "(${hex(e)} místo ${hex(v)})" else "(nepřišlo)") + ", pokračuji")
     }
 
     private fun fiveBaud(address: Int) {
@@ -138,12 +145,13 @@ class Kw1281(
         var curBaud = baud
         var switched = false
         var garbage = 0
+        var zeros = 0   // our own 5-baud wake-up read back as 00 00: the cable echoes
         val ignored = StringBuilder()
         while (Clock.now() < deadline) {
             val b = try { readByte(300) } catch (e: IOException) { continue }
             if (b == 0x55) { gotSync = true; break }
             if (ignored.length < 120) ignored.append(hex(b)).append(' ')
-            if (b != 0x00) garbage++
+            if (b != 0x00) garbage++ else zeros++
             // 0x55 sent at 9600 Bd and read at 10400 Bd arrives as 0xB5 / 0x95.
             if (!switched && curBaud == 10400 && (b == 0xB5 || b == 0x95)) {
                 curBaud = 9600
@@ -162,6 +170,9 @@ class Kw1281(
             throw NoAnswer("Jednotka ${hex(address)} neodpověděla na probuzení")
         }
         connectedBaud = curBaud
+        // The wake-up came back as 00 bytes, so the cable echoes – decide it now instead of from the first byte,
+        // which could itself be the one byte that gets lost.
+        if (zeros > 0) echo = true
 
         val kb1 = readByte(500)
         val kb2 = readByte(500)
@@ -196,18 +207,49 @@ class Kw1281(
         return b
     }
 
+    /**
+     * Receives one block. When the unit misses one of our confirmations it starts the same block again from its
+     * length byte (seen in the car: "1B 01 F6 B8 45 30 39 30 1B 01 F6 B8 45 …"). Every byte is still confirmed,
+     * so the unit is happy – only our framing is off. That shows as a wrong end byte; then we find where the
+     * repeat began and continue the block from there instead of dropping the whole connection.
+     */
     fun receiveBlock(): Block {
         cur.setLength(0)
-        val len = recvWithComplement()
-        if (len < 3) throw IOException("Rozsypaný blok (délka ${hex(len)})")
-        val cnt = recvWithComplement()
-        val title = recvWithComplement()
-        val data = IntArray(len - 3) { recvWithComplement() }
-        val end = readByte(1500)
-        if (end != 0x03) throw IOException("Rozsypaný blok (konec ${hex(end)} místo 03): ${cur.toString().trim()}")
+        val seq = ArrayList<Int>(32)
+        var restarts = 0
+        while (true) {
+            while (seq.size < (seq.firstOrNull() ?: 1)) {
+                val b = recvWithComplement()
+                seq.add(b)
+                if (seq.size == 1 && b < 3) throw IOException("Rozsypaný blok (délka ${hex(b)})")
+            }
+            val end = try { readByte(400) } catch (e: IOException) { null }
+            if (end == null) { note(++lostEnds, "konec bloku nepřišel, blok je celý, pokračuji"); break }
+            if (end == 0x03) break
+            val full = seq + end
+            val k = restartAt(full)
+            if (k < 1 || ++restarts > 4) throw IOException("Rozsypaný blok (konec ${hex(end)} místo 03): ${cur.toString().trim()}")
+            note(++repeatedBlocks, "jednotka poslala blok znovu od začátku (bajt $k), navazuji")
+            val tail = full.subList(k, full.size).toList()
+            seq.clear(); seq.addAll(tail)
+            cur.append(hex(end)).append(' ')
+            writeByte(end xor 0xFF)     // that byte belongs to the repeated block: confirm it like any other
+        }
         cur.setLength(0)
+        val cnt = seq[1]
         counter = cnt
-        return Block(cnt, title, data)
+        return Block(cnt, seq[2], IntArray(seq.size - 3) { seq[it + 3] })
+    }
+
+    /** Where the unit started the block again: the same length byte, followed two bytes later by a block title. */
+    private fun restartAt(full: List<Int>): Int {
+        val len = full[0]
+        for (k in full.size - 1 downTo 1) {
+            if (full[k] != len) continue
+            val t = full.getOrNull(k + 2)
+            if (t == null || t in TITLES) return k
+        }
+        return -1
     }
 
     fun sendBlock(title: Int, data: IntArray) {
@@ -219,14 +261,31 @@ class Kw1281(
         for (i in data.indices) bytes[3 + i] = data[i]
         bytes[bytes.size - 1] = 0x03
         Clock.sleep(2)
+        var prev = -1
         for (i in 0 until bytes.size - 1) {
             writeByte(bytes[i])
-            val c = readByte(1500)
-            if (c != (bytes[i] xor 0xFF)) {
-                throw IOException("Jednotka potvrdila bajt ${hex(bytes[i])} špatně (${hex(c)} místo ${hex(bytes[i] xor 0xFF)})")
+            val want = bytes[i] xor 0xFF
+            // The unit confirms within a few ms. If nothing came, the confirmation got lost on the way to the phone
+            // (the unit got our byte – it would otherwise have nothing to answer): send the next byte before the
+            // unit gives up waiting for it.
+            var c: Int? = null
+            val until = Clock.now() + 45
+            while (true) {
+                val x = try { readByte((until - Clock.now()).toInt().coerceAtLeast(1)) } catch (e: IOException) { null } ?: break
+                if (x != want && (x == prev || x == bytes[i])) continue   // late confirmation of the previous byte, or our echo behind it
+                c = x; break
             }
+            if (c == null) { note(++lostAcks, "potvrzení bajtu ${hex(bytes[i])} nepřišlo, pokračuji"); prev = want; continue }
+            if (c != want) {
+                throw IOException("Jednotka potvrdila bajt ${hex(bytes[i])} špatně (${hex(c)} místo ${hex(want)})")
+            }
+            prev = -1
         }
         writeByte(0x03)
+        if (prev >= 0) {    // the last confirmation may still come: don't take it for the start of the unit's answer
+            val x = try { readByte(30) } catch (e: IOException) { null }
+            if (x != null && x != prev) rx.addFirst(x)
+        }
     }
 
     /** Reads one measuring group (VCDS "Meas. Blocks"). Returns null when the unit does not support the group. */
@@ -267,6 +326,11 @@ class Kw1281(
         }
         trace("← chybové kódy: ${out.size}")
         return out
+    }
+
+    companion object {
+        /** Block titles a unit sends: ACK, NAK, group data, text, fault codes and the rarer ones. */
+        private val TITLES = setOf(0x02, 0x09, 0x0A, 0xE7, 0xEF, 0xF0, 0xF4, 0xF6, 0xFB, 0xFC, 0xFD, 0xFE)
     }
 
     fun end() {

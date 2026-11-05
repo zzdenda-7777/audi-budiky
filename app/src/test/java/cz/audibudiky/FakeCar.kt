@@ -28,6 +28,17 @@ class FakeCar(
     @Volatile var aborts = 0
     @Volatile var groupsServed = 0
     @Volatile var lastAbort = ""
+    /** Like the real unit: when our confirmation doesn't come, send the whole block again (this many times). */
+    @Volatile var maxRepeats = 3
+    @Volatile var repeats = 0
+    /** How long the unit waits for the tester's confirmation before it repeats the block. */
+    @Volatile var ackTimeoutMs = 60L
+    /** The phone loses single bytes coming from the cable (seen on a Xiaomi with Android 16): our echo or the unit's bytes. */
+    @Volatile var echoLoss = 0.0
+    @Volatile var rxLoss = 0.0
+    @Volatile var lostOnPhone = 0
+    private val rnd = java.util.Random(7)
+    private fun lose(p: Double): Boolean = p > 0 && synchronized(rnd) { rnd.nextDouble() < p }.also { if (it) lostOnPhone++ }
     val idents = listOf("038906018G  ", "1,9l R4 EDC  ", "G10SG  1608")
 
     private val fromTester = LinkedBlockingQueue<Int>()
@@ -44,7 +55,7 @@ class FakeCar(
     override fun write(b: Int) {
         val v = b and 0xFF
         if (byteMs > 0) Clock.sleep(byteMs)
-        if (echo) rx.addLast(v)
+        if (echo && !lose(echoLoss)) rx.addLast(v)
         fromTester.offer(if (lineBaud == ecuBaud) v else garble(v, lineBaud, ecuBaud))
     }
 
@@ -63,6 +74,7 @@ class FakeCar(
                     if (!low) v = v or (1 shl i)
                 }
                 startT = -1
+                if (echo) { rx.addLast(0x00); rx.addLast(0x00) }   // an echoing cable reads its own wake-up back as 00 00
                 wake.offer(v and 0x7F)
             }
         }
@@ -72,6 +84,7 @@ class FakeCar(
         if (dropAfterBytes == 0) { dropAfterBytes = -1; return }
         if (dropAfterBytes > 0) dropAfterBytes--
         if (byteMs > 0) Clock.sleep(byteMs)
+        if (lose(rxLoss)) return
         rx.addLast(if (lineBaud == ecuBaud) b and 0xFF else garble(b and 0xFF, ecuBaud, lineBaud))
     }
 
@@ -103,11 +116,18 @@ class FakeCar(
     private fun sendBlock(title: Int, data: IntArray): Boolean {
         cnt = (cnt + 1) and 0xFF
         val bytes = intArrayOf(data.size + 3, cnt, title) + data + intArrayOf(0x03)
-        for (i in 0 until bytes.size - 1) {
+        var tries = 0
+        var i = 0
+        while (i < bytes.size - 1) {
             Clock.sleep(replyDelayMs)
             send(bytes[i])
-            val c = fromTester.poll(100, TimeUnit.MILLISECONDS) ?: return abort("tester nepotvrdil bajt $i bloku ${"%02X".format(title)}")
-            if (c != (bytes[i] xor 0xFF)) return abort("špatné potvrzení")
+            val c = fromTester.poll(ackTimeoutMs, TimeUnit.MILLISECONDS)
+            if (c == (bytes[i] xor 0xFF)) { i++; continue }
+            // no or wrong confirmation: start the block again, like the real unit does
+            if (++tries > maxRepeats) return abort(if (c == null) "tester nepotvrdil bajt $i bloku ${"%02X".format(title)}" else "špatné potvrzení")
+            repeats++
+            Clock.sleep(5); fromTester.clear()
+            i = 0
         }
         Clock.sleep(replyDelayMs)
         send(0x03)
