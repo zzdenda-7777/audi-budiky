@@ -1,0 +1,87 @@
+To honour the JVM settings for this build a single-use Daemon process will be forked. For more on this, please refer to https://docs.gradle.org/8.7/userguide/gradle_daemon.html#sec:disabling_the_daemon in the Gradle documentation.
+Daemon will be stopped at the end of the build 
+> Task :app:checkKotlinGradlePluginConfigurationErrors
+> Task :app:preBuild UP-TO-DATE
+> Task :app:preDebugBuild UP-TO-DATE
+> Task :app:checkDebugAarMetadata
+> Task :app:generateDebugResValues
+> Task :app:mapDebugSourceSetPaths
+> Task :app:generateDebugResources
+> Task :app:packageDebugResources
+> Task :app:createDebugCompatibleScreenManifests
+> Task :app:extractDeepLinksDebug
+> Task :app:mergeDebugResources
+> Task :app:parseDebugLocalResources
+> Task :app:processDebugMainManifest
+> Task :app:processDebugManifest
+> Task :app:preDebugUnitTestBuild UP-TO-DATE
+> Task :app:javaPreCompileDebug
+> Task :app:processDebugManifestForPackage
+> Task :app:javaPreCompileDebugUnitTest
+> Task :app:processDebugResources
+
+> Task :app:compileDebugKotlin
+w: file:///home/runner/work/audi-budiky/audi-budiky/app/src/main/java/cz/audibudiky/MainActivity.kt:352:30 Parameter 'seconds' is never used
+w: file:///home/runner/work/audi-budiky/audi-budiky/app/src/main/java/cz/audibudiky/MainActivity.kt:934:42 Unnecessary non-null assertion (!!) on a non-null receiver of type BtLink
+
+> Task :app:compileDebugJavaWithJavac NO-SOURCE
+> Task :app:bundleDebugClassesToRuntimeJar
+> Task :app:bundleDebugClassesToCompileJar
+> Task :app:processDebugJavaRes
+
+> Task :app:compileDebugUnitTestKotlin
+w: file:///home/runner/work/audi-budiky/audi-budiky/app/src/test/java/cz/audibudiky/KwScenarios.kt:25:72 Parameter 'car' is never used, could be renamed to _
+w: file:///home/runner/work/audi-budiky/audi-budiky/app/src/test/java/cz/audibudiky/KwScenarios.kt:33:67 Parameter 'car' is never used, could be renamed to _
+w: file:///home/runner/work/audi-budiky/audi-budiky/app/src/test/java/cz/audibudiky/KwScenarios.kt:59:74 Parameter 'car' is never used, could be renamed to _
+w: file:///home/runner/work/audi-budiky/audi-budiky/app/src/test/java/cz/audibudiky/KwScenarios.kt:115:79 Parameter 'car' is never used, could be renamed to _
+
+> Task :app:compileDebugUnitTestJavaWithJavac NO-SOURCE
+> Task :app:processDebugUnitTestJavaRes
+
+> Task :app:testDebugUnitTest
+
+cz.audibudiky.Kw1281SimTest > protocolScenarios STANDARD_OUT
+    OK Jednotka zopakuje blok — jednotka zopakovala blok 1×, aplikace navázala, hodnoty sedí, spojení drží
+    OK Ztracená echa (2 %) — ztráta echa 2 %, bajtů jednotky 0 %: 300/300 čtení OK, nové spojení 0×, ztraceno na telefonu 103 bajtů, jednotka opakovala blok 0×
+    OK Ztracené bajty z kabelu (1 % echa + 1 % jednotky) — ztráta echa 1 %, bajtů jednotky 1 %: 300/300 čtení OK, nové spojení 0×, ztraceno na telefonu 131 bajtů, jednotka opakovala blok 50×
+    OK Zkreslení rychlosti jako v autě — 55 → 95, 8A → 0A (v autě bylo B5/95 01 0A)
+    OK Připojení: jednotka 9600, start 10400 — připojeno za 3154 ms, 038906018G  1,9l R4 EDC  G10SG  1608
+    OK Čtení skupin a hodnot — 001: [800.0 ot/min, 5.0 mg/zdvih, 15.2 V, 90.0 °C], 012 = není, pak čte dál
+    OK Chybové kódy — 17964 a 00553 přečteny, bez chyb = prázdný seznam, čtení pokračuje
+    OK Kabel bez echa — kabel bez echa: 20 čtení OK
+    OK Vypnuté zapalování — bez zapalování: NoAnswer za 5382 ms
+    OK Ztracený bajt uprostřed čtení — ztracený bajt poznán za 1546 ms
+    OK Obnova po výpadku se zámkem jednotky — po výpadku a 8s zámku jednotky znovu živě za 10939 ms (2 pokusy)
+    OK Dlouhé čtení (600 skupin) — 600 čtení bez chyby (čítač bloků přetekl 4×), 11.5 skupin/s v simulaci
+    OK Přístrojový panel 10400 — panel na 10400: 038906018G  1,9l R4 EDC  G10SG  1608
+    OK Jednotka 10400, start 9600 — jednotka na 10400, začátek na 9600: navrženo 10400, připojeno
+    OK Opětovné připojení po řádném konci — po řádném ukončení (např. čtení panelu) se motor znovu připojí
+    TESTY: 15/15 prošlo
+
+cz.audibudiky.Kw1281SimTest > protocolScenarios PASSED
+
+cz.audibudiky.ObdSimTest > obdScenarios STANDARD_OUT
+    OK OBD Pojistka: posílá jen čtení — zápis, mazání, akční členy a bezpečnostní přístup se neposílají (13 zakázaných, 7 povolených)
+    OK OBD Průzkum jednotky PSA (21xx) — průzkum 21 00–FF: 3 odpovědi, 16 odmítnuto, 237 bez odpovědi, jen čtení
+    OK OBD Začátek vstřiku a spotřeba (PID 5D, 5E) — začátek vstřiku 5.0 °, spotřeba 1.0 l/h (když je auto hlásí)
+    OK OBD Adaptér a protokol auta (206 HDi, linka K) — ELM327 v1.5, ISO 14230-4 (KWP FAST), 23 hodnot
+    OK OBD Hodnoty: otáčky, voda, sání, MAF, napětí — otáčky 820.0, voda 88.0 °C, sání 101.0 kPa, MAF 6.5 g/s, 14.266 V
+    OK OBD Klon bez mezer v odpovědích — klon bez mezer: otáčky 820.0
+    OK OBD Klon, který nevypne ozvěnu — klon s ozvěnou: voda 88.0 °C
+    OK OBD Nepodporovaná hodnota = NO DATA — nepodporovaná hodnota = NO DATA, spojení drží
+    OK OBD Chybové kódy přes linku K + kontrolka — chyby P0401, P0101, P0299, P0380, kontrolka svítí, počet 4
+    OK OBD Prázdná paměť chyb — paměť chyb prázdná
+    OK OBD Chybové kódy přes CAN (víc rámců) — CAN: P0401, P0101, P0299, P2263, čekající P0087
+    OK OBD Vypnuté zapalování — vypnuté zapalování: Probuzení diagnostické linky selhalo (BUS INIT ERROR) – je zapnuté zapalování?
+    OK OBD Automatika selže, ruční protokol — automatika selhala, protokol 5 ručně: ISO 14230-4 (KWP FAST)
+    OK OBD Adaptér mlčí — mlčící adaptér: Adaptér neodpověděl na ATWS do 5.0 s
+    OK OBD Napětí baterie a VIN — baterie 12.4 V, VIN VF32AWHZE12345678
+    OK OBD VIN přes CAN — CAN VIN VF32AWHZE12345678
+    OK OBD Nikdy nemaže chyby (jen čte) — příkaz 04 (mazání) se neposílá – aplikace jen čte
+    TESTY OBD: 17/17 prošlo
+
+cz.audibudiky.ObdSimTest > obdScenarios PASSED
+gradle/actions: Writing build results to /home/runner/work/_temp/.gradle-actions/build-results/tests-1793895609899.json
+
+BUILD SUCCESSFUL in 3m 56s
+23 actionable tasks: 23 executed
