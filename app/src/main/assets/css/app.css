@@ -520,3 +520,10 @@ body.pip{overflow:hidden}
 .pips{font-size:7vh;color:var(--muted);text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .pips[hidden]{display:none}
 .h-oil{color:var(--warn)}
+/* Cesta → Zábava */
+#tripSeg button{font-size:13.5px;padding:8px 2px}
+.gmcv{display:block;width:100%;height:auto;aspect-ratio:1/1;max-height:360px;margin:4px auto 0}
+.gmtxt{text-align:center;margin:6px 0 8px;font-size:14px}
+.gmtxt b{font-family:var(--cond);font-size:18px;color:var(--text)}
+.gmtxt small{display:block;color:var(--muted);font-size:12px;margin-top:2px}
+.card.wrap .fact b{font-size:20px}

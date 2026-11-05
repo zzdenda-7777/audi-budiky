@@ -218,6 +218,7 @@ function renderTripView(full){
   if (tripMode === 'hist') { if (full) renderHistory(); return; }
   if (tripMode === 'route') { renderRoute(full); return; }
   if (tripMode === 'cmp') { if (full) renderCompare(); return; }
+  if (tripMode === 'fun') { renderFun(full); return; }
   if (isObd()) { renderTripObd(); return; }
   const T = TRIP, inst = l100(), lh = lph();
   const consV = inst != null ? fmt(inst, 1) : fmt(lh, 1), consU = inst != null ? 'l/100' : 'l/h';
@@ -241,9 +242,10 @@ function renderTripView(full){
   h += '<div class="card"><h3>Přístrojový panel <button class="btn small" id="btnClu"' + (S.state === 'live' ? '' : ' disabled') + '>Načíst znovu</button></h3>' + kvRows([
     ['Venku', fmt(any('outT'), 0) + ' °C'], ['Palivo (panel)', fmt(any('fuelL'), 0) + ' l'], ['Stav km', fmt(any('odo'), 0)], ['Olej', S.cluHasOil ? fmt(any('oilT'), 0) + ' °C' : 'nehlásí'], ['Hladina oleje', S.cluHasLvl ? fmt(any('oilLvl'), 0) + ' mm' + oilLvlDelta() : 'nehlásí']
   ]) + '<p class="note" style="margin:8px 0 0">Panel se čte jen při připojení – motor pak běží živě bez přerušení. „Načíst znovu“ motor přeruší asi na 5 s.</p></div>';
-  h += factsCardHTML();
+  h += oilCardHTML() + factsCardHTML();
   $('tripBody').innerHTML = h;
   if ($('btnFacts')) $('btnFacts').onclick = openFactsSheet;
+  if ($('btnOilAdd')) $('btnOilAdd').onclick = openOilSheet;
   $('btnNewTrip').onclick = () => { endTrip(); renderTripView(true); showToast('Nová jízda začala'); };
   $('btnClu').onclick = () => { if (A && A.readClusterNow) { unitJob('cluster', CLU); showToast('Čtu panel…'); } };
 }
@@ -272,9 +274,10 @@ function renderTripObd(){
     ['Max otáčky', T ? fmt(T.maxRpm, 0) : '–'], ['Max rychlost', T ? fmt(T.maxSpd, 0) + ' km/h' : '–'],
     ['Max voda', T && T.maxCool ? fmt(T.maxCool, 0) + ' °C' : '–'], ['Max zatížení', T && T.maxLoad != null ? fmt(T.maxLoad, 0) + ' %' : '–']
   ]) + (speed() == null ? '<p class="note" style="margin:8px 0 0">Kilometry a l/100 km jdou z GPS nebo z rychlosti auta – zapni GPS ve Více → Nastavení.</p>' : '') + '</div>';
-  h += factsCardHTML();
+  h += oilCardHTML() + factsCardHTML();
   $('tripBody').innerHTML = h;
   if ($('btnFacts')) $('btnFacts').onclick = openFactsSheet;
+  if ($('btnOilAdd')) $('btnOilAdd').onclick = openOilSheet;
   $('btnNewTrip').onclick = () => { endTrip(); renderTripView(true); showToast('Nová jízda začala'); };
   $('btnFill').onclick = openFillSheet;
 }

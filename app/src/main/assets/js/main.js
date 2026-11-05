@@ -244,7 +244,7 @@ setInterval(() => {
   const t = performance.now(), dt = Math.min(5, (t - lastTick) / 1000); lastTick = t; tickN++;
   sampleValues(); sample(); renderBanner(); shiftCheck(); tripTick(dt); engineTick(dt);
   if (PIP.on) { pipUpdate(); }
-  if (tickN % 4 === 0) pipSync();
+  if (tickN % 4 === 0) { pipSync(); if (typeof gmTick === 'function') gmTick(); }
   if (curView === 'charts') drawCharts();
   unitWatch(); scanTick();
   if (curView === 'tests' && TST.cur) updateTest();

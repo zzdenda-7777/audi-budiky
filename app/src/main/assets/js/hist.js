@@ -42,6 +42,7 @@ function histEvents(c){
   (c.faultLog || []).forEach(f => { ev.push({ k: 'fl' + f.t + f.u, type: 'flt', t: f.t, f, prev: prev[f.u] || null }); prev[f.u] = f; });
   (c.fuelLog || []).forEach(x => ev.push({ k: 'fu' + x.t, type: 'fill', t: x.t, x }));
   (c.oilLog || []).forEach((x, i, arr) => ev.push({ k: 'ol' + x.t, type: 'oil', t: x.t, x, prev: arr[i - 1] || null }));
+  (c.oilAdds || []).forEach(x => ev.push({ k: 'oa' + x.t, type: 'oiladd', t: x.t, x }));
   const accTests = (c.log || []).filter(r => r.id === 'acc').map(r => r.t);
   Object.keys(c.acc || {}).forEach(m => (c.acc[m].last || []).forEach(x => {
     if (accTests.some(t => Math.abs(t - x.t) < 5000)) return;            // already there as a test run
@@ -66,6 +67,7 @@ function evHead(e, c){
     return { ico: hico('flt', n ? 'h-bad' : 'h-ok'), title: 'Chyby – ' + unitTxt(f.u).toLowerCase() + ': ' + (n ? n + (n === 1 ? ' chyba' : n <= 4 ? ' chyby' : ' chyb') : 'žádné ✓'),
       sub: n ? f.list.slice(0, 4).map(fCode).join(', ') + (n > 4 ? ' …' : '') + (nw && pk ? ' · nové: ' + nw : '') : (e.prev && e.prev.list.length ? 'od minula zmizelo ' + e.prev.list.length : 'paměť čistá') };
   }
+  if (e.type === 'oiladd') return { ico: hico('oil', 'h-oil'), title: 'Doleván olej · ' + fmt(e.x.l, 1) + ' l', sub: e.x.km != null ? fmt(e.x.km, 0) + ' km' : '' };
   if (e.type === 'oil') {
     const x = e.x, d = e.prev ? x.v - e.prev.v : null;
     return { ico: hico('oil', d != null && d <= -3 ? 'h-bad' : 'h-oil'), title: 'Hladina oleje · ' + fmt(x.v, 0) + ' mm',
@@ -122,6 +124,10 @@ function evBody(e, c){
     if (f.mil != null) extra.push(['Kontrolka motoru', f.mil ? 'svítila' : 'nesvítila']);
     if (f.odo != null) extra.push(['Stav km', fmt(f.odo, 0)]);
     return h + kvRows(extra);
+  }
+  if (e.type === 'oiladd') {
+    const s = oilStats(c);
+    return kvRows([['Kdy', dtShort(e.x.t)], ['Litrů', fmt(e.x.l, 2)], ['Stav km', e.x.km != null ? fmt(e.x.km, 0) : '–'], ['Spotřeba teď', s.l != null ? '≈ ' + fmt(s.l, 2) + ' l / 1000 km' : '–']]);
   }
   if (e.type === 'oil') {
     const x = e.x;
@@ -297,6 +303,11 @@ function histText(c){
   (c.log || []).forEach(r => { L.push(new Date(r.t).toLocaleString('cs-CZ') + ' · ' + testName(r.id) + ' · ' + (r.grade && GRADES[r.grade] ? GRADES[r.grade][1] + ' ' + r.score + '/100' : (VERD[r.v] || VERD.none)[1]) + ' · ' + strip(r.sum));
     (r.rows || []).forEach(x => L.push('    ' + strip(x[0]) + ': ' + strip(x[1]))); });
   Object.keys(c.acc || {}).forEach(m => L.push('Zrychlení ' + m + ': nejlepší ' + fmt(c.acc[m].best, 2) + ' s, poslední ' + (c.acc[m].last || []).slice(0, 10).map(x => fmt(x.v, 2)).join(', ')));
+  if ((c.oilLog || []).length || (c.oilAdds || []).length) {
+    const s = oilStats(c);
+    L.push('', '== SPOTŘEBA OLEJE ==', 'Spotřeba: ' + (s.l != null ? '≈ ' + fmt(s.l, 2) + ' l / 1000 km (' + (s.src === 'add' ? 'z dolévání' : 'z hladiny') + ')' : 'zatím málo dat') + (s.mm != null ? ', hladina ' + (s.mm >= 0 ? 'klesá' : 'stoupá') + ' ' + fmt(Math.abs(s.mm), 1) + ' mm / 1000 km' : '') + (s.mmPerL ? ', 1 l ≈ ' + fmt(s.mmPerL, 1) + ' mm' : ''));
+    (c.oilAdds || []).forEach(x => L.push(new Date(x.t).toLocaleString('cs-CZ') + ' · doleváno ' + fmt(x.l, 2) + ' l' + (x.km != null ? ' · ' + fmt(x.km, 0) + ' km' : '')));
+  }
   if ((c.oilLog || []).length) {
     L.push('', '== HLADINA OLEJE ==');
     c.oilLog.forEach(x => L.push(new Date(x.t).toLocaleString('cs-CZ') + ' · ' + fmt(x.v, 1) + ' mm' + (x.oilT != null ? ' · olej ' + x.oilT + ' °C' : '') + (x.cool != null ? ' · voda ' + x.cool + ' °C' : '') + (x.odo != null ? ' · ' + fmt(x.odo, 0) + ' km' : '')));

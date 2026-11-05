@@ -6,8 +6,8 @@
 
 const big = n => n == null || !isFinite(n) ? '–' : String(Math.round(n)).replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
 const minTxt = s => s < 90 ? Math.round(s) + ' s' : s < 5400 ? Math.round(s / 60) + ' min' : Math.floor(s / 3600) + ' h ' + String(Math.round(s % 3600 / 60)).padStart(2, '0') + ' min';
-const FX_KEYS = ['liveS', 'rpmS', 'engS', 'revs', 'air', 'airS', 'idleS', 'moveS', 'cutS', 'cutKm', 'boostS', 'boostOnS', 'fullS', 'fullN', 'hiS', 'stops', 'shifts', 'egrS', 'egrOnS', 'egrN', 'maxAcc', 'maxBrk'];
-const FX_MAX = new Set(['maxAcc', 'maxBrk']);
+const FX_KEYS = ['liveS', 'rpmS', 'engS', 'revs', 'air', 'airS', 'idleS', 'moveS', 'cutS', 'cutKm', 'boostS', 'boostOnS', 'fullS', 'fullN', 'hiS', 'stops', 'shifts', 'egrS', 'egrOnS', 'egrN', 'maxAcc', 'maxBrk', 'maxLat'];
+const FX_MAX = new Set(['maxAcc', 'maxBrk', 'maxLat']);
 
 function factsTick(dt){
   const F = TRIP.fx || (TRIP.fx = {});
@@ -45,6 +45,8 @@ function factsTick(dt){
         if (g > 0 && g < 0.9) F.maxAcc = Math.max(F.maxAcc, g);
         if (g < 0 && g > -1.2) F.maxBrk = Math.max(F.maxBrk, -g);
       }
+      /* bends: the phone's own motion sensor (Cesta → Zábava → G-metr), only while it sits still in a holder */
+      if (typeof GM !== 'undefined') { const pk = GM.takeLat(); if (GM.ok() && sp > 15) F.maxLat = Math.max(F.maxLat, Math.min(1.3, pk)); }
       if (rpm != null && sp > 12 && rpm > 900) {
         const k = rpm / sp;
         if (F.kc != null && Math.abs(k - F.kc) / F.kc < 0.06) { F.kc = (F.kc * F.kn + k) / (F.kn + 1); F.kn++; } else { F.kc = k; F.kn = 1; }
@@ -57,7 +59,7 @@ function factsTick(dt){
 /* what is kept with a trip (no working state) */
 function factsSummary(F){
   if (!F) return null;
-  const o = {}; FX_KEYS.forEach(k => { o[k] = F[k] != null ? +(+F[k]).toFixed(k === 'maxAcc' || k === 'maxBrk' ? 3 : 2) : 0; }); return o;
+  const o = {}; FX_KEYS.forEach(k => { o[k] = F[k] != null ? +(+F[k]).toFixed(FX_MAX.has(k) ? 3 : 2) : 0; }); return o;
 }
 function factsAdd(list){
   const o = {}; FX_KEYS.forEach(k => { o[k] = 0; });
@@ -91,6 +93,7 @@ function factsList(F, km, fuel, cost, P){
   if (F.fullN > 0) out.push([big(F.fullN) + '×', 'Plný plyn', 'Celkem ' + minTxt(F.fullS) + (F.moveS > 60 ? ', to je ' + fmt(F.fullS / F.moveS * 100, 1) + ' % jízdy.' : '.')]);
   if (F.boostS > 30) out.push([fmt(F.boostOnS / F.boostS * 100, 0) + ' %', 'Času jelo turbo naplno', 'Tlak turba nad 0,3 bar celkem ' + minTxt(F.boostOnS) + '.']);
   if (F.hiS > 3) out.push([minTxt(F.hiS), 'Nad 3000 otáček', F.rpmS > 60 ? fmt(F.hiS / F.rpmS * 100, 1) + ' % času s motorem v chodu.' : '']);
+  if (F.maxLat > 0.08) out.push([fmt(F.maxLat, 2) + ' g', 'Nejostřejší zatáčka', 'Podle snímače pohybu v telefonu (musí být v držáku). Běžná ostrá zatáčka je kolem 0,3 g, nad 0,7 g už jedou závodníci.']);
   if (F.maxAcc > 0.05 || F.maxBrk > 0.05) out.push([fmt(F.maxAcc, 2) + ' g', 'Nejsilnější zrychlení', 'Nejprudší brzdění ' + fmt(F.maxBrk, 2) + ' g. Pro představu: 1 g je volný pád, sportovní auto zrychluje kolem 0,8 g.']);
   if (F.egrS > 30) out.push([big(F.egrN) + '×', 'Otevřel se ventil EGR', 'Otevřený byl ' + fmt(F.egrOnS / F.egrS * 100, 0) + ' % času – vrací část výfukových plynů zpátky do sání.']);
   if (F.moveS > 60 && km > 0.5) out.push([fmt(km / (F.moveS / 3600), 0) + ' km/h', 'Průměrná rychlost v pohybu', 'Bez stání. Za volantem v pohybu ' + minTxt(F.moveS) + '.']);
@@ -101,6 +104,11 @@ function factsList(F, km, fuel, cost, P){
   }
   if (cost > 1 && km > 1) out.push([fmt(cost / km, 2) + ' Kč', 'Stál jeden kilometr', 'Jen nafta, při ceně ' + fmt(CFG.price, 2) + ' Kč/l.']);
   return out;
+}
+/* driving style from how much of the moving time is full throttle and high revs */
+function driveStyle(F){
+  const sport = F.moveS > 0 ? (F.fullS + F.hiS) / F.moveS * 100 : 0;
+  return sport < 2 ? ['Klidný řidič', 'Plný plyn a vysoké otáčky skoro nepoužíváš – motor i turbo to ocení.'] : sport < 6 ? ['Svižný řidič', 'Občas to pustíš naplno, většinou jedeš rozumně.'] : ['Sportovní řidič', 'Plný plyn a otáčky nad 3000 jsou u tebe běžné – hlídej teplotu oleje a dochlazení turba.'];
 }
 function factsHTML(list, max){
   if (!list.length) return '<p class="note" style="margin:0">Fakta se počítají za jízdy s připojenou aplikací – za pár minut tu budou.</p>';
@@ -130,7 +138,7 @@ function tabFacts(c){
   /* style: how much of the moving time on full throttle and high revs, how much coasting */
   if (F.moveS > 300) {
     const sport = (F.fullS + F.hiS) / F.moveS * 100, eco = km > 1 ? F.cutKm / km * 100 : 0;
-    const st = sport < 2 ? ['Klidný řidič', 'Plný plyn a vysoké otáčky skoro nepoužíváš – motor i turbo to ocení.'] : sport < 6 ? ['Svižný řidič', 'Občas to pustíš naplno, většinou jedeš rozumně.'] : ['Sportovní řidič', 'Plný plyn a otáčky nad 3000 jsou u tebe běžné – hlídej teplotu oleje a dochlazení turba.'];
+    const st = driveStyle(F);
     h += '<div class="card"><h3>Tvůj styl jízdy</h3><div class="fstyle"><b>' + st[0] + '</b><small>' + st[1] + '</small></div>' + kvRows([['Plný plyn + vysoké otáčky', fmt(sport, 1) + ' % jízdy'], ['Zadarmo (brzdění motorem)', fmt(eco, 0) + ' % cesty'],
       ['Řazení', km > 2 ? fmt(F.shifts / km * 10, 1) + '× na 10 km' : '–'], ['Stání na volnoběhu', F.liveS > 0 ? fmt(F.idleS / F.liveS * 100, 0) + ' % času' : '–']]) + '</div>';
   }
