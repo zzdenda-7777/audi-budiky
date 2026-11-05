@@ -58,7 +58,7 @@ const HEALTH_ROWS = [
       return [lvl, lvl === 'ok' ? 'V pořádku' : lvl === 'warn' ? 'Trochu málo' : 'Málo vzduchu', info];
     } },
   { id: 'temp', name: 'Teploty', eval(){
-      const c = fresh('cool', 15000), f = fresh('fuelT', 15000), i = fresh('iat', 15000), o = any('oilT');
+      const c = fresh('cool', 15000), f = fresh('fuelT', 15000), i = fresh('iat', 15000), o = oilReal();
       if (c == null) return ['', 'Čekám na data', ''];
       let lvl = (statusOf('cool', c) || [''])[0];
       if (lvl === 'info') return ['info', 'Zahřívá se', 'voda ' + fmt(c, 0) + ' °C\nzahřátý od 80 °C'];

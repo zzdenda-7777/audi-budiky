@@ -163,6 +163,7 @@ const ENGST = { wasCold: false, warmUntil: 0, heat: 0, cd: false, cdDoneUntil: 0
 const isIdle = () => { const rpm = fresh('rpm', 3000), sp = speed(); return rpm != null && rpm < 1100 && (sp == null || sp < 3); };
 function engineTick(dt){
   if (S.state !== 'live' || R.on) return;
+  oilTick();
   const cool = fresh('cool', 15000), rpm = fresh('rpm', 3000);
   if (cool != null) {
     if (cool < 70) { ENGST.wasCold = true; if (TRIP && TRIP.coldStart == null && TRIP.warmSec == null) TRIP.coldStart = Date.now(); }
@@ -214,6 +215,7 @@ function renderTripView(full){
   h += '<div class="card"><h3>Stav motoru</h3>' +
     '<div class="row" style="justify-content:space-between"><span class="note" style="font-size:13.5px">Zahřátí ' + (cool == null ? '–' : fmt(cool, 0) + ' °C') + '</span><span class="note" style="font-size:13.5px">' + (cool == null ? '' : cool >= 80 ? 'zahřátý' : 'netoč nad 2500') + '</span></div>' +
     '<div class="progress' + (cool >= 80 ? ' ok' : '') + '" style="margin:6px 0 10px"><i style="width:' + (warmP * 100).toFixed(0) + '%"></i></div>' +
+    (oilNow() != null ? '<div class="row" style="justify-content:space-between;margin-bottom:6px"><span class="note" style="font-size:13.5px">Olej' + (oilSrc() === 'real' ? '' : ' (odhad)') + '</span><b style="font-family:var(--cond);font-size:16px">' + fmt(oilNow(), 0) + ' °C' + (oilNow() < 70 ? ' · ještě studený' : '') + '</b></div>' : '') +
     '<div class="row" style="justify-content:space-between"><span class="note" style="font-size:13.5px">Turbo</span><b style="font-family:var(--cond);font-size:16px">' + turboTxt + '</b></div></div>';
   h += '<div class="card"><h3>Jízda <button class="btn small ghost" id="btnNewTrip">Nová jízda</button></h3>' + kvRows([
     ['Ujeto', T ? fmt(T.km, 1) + ' km' : '–'], ['Doba', T ? durTxt(T.last - T.start) : '–'],
@@ -249,6 +251,7 @@ function renderTripObd(){
   h += '<div class="card"><h3>Stav motoru</h3>' +
     '<div class="row" style="justify-content:space-between"><span class="note" style="font-size:13.5px">Zahřátí ' + (cool == null ? '–' : fmt(cool, 0) + ' °C') + '</span><span class="note" style="font-size:13.5px">' + (cool == null ? '' : cool >= 80 ? 'zahřátý' : 'netoč nad 2500') + '</span></div>' +
     '<div class="progress' + (cool >= 80 ? ' ok' : '') + '" style="margin:6px 0 10px"><i style="width:' + (warmP * 100).toFixed(0) + '%"></i></div>' +
+    (oilNow() != null ? '<div class="row" style="justify-content:space-between;margin-bottom:6px"><span class="note" style="font-size:13.5px">Olej' + (oilSrc() === 'real' ? '' : ' (odhad)') + '</span><b style="font-family:var(--cond);font-size:16px">' + fmt(oilNow(), 0) + ' °C' + (oilNow() < 70 ? ' · ještě studený' : '') + '</b></div>' : '') +
     '<div class="row" style="justify-content:space-between"><span class="note" style="font-size:13.5px">Turbo</span><b style="font-family:var(--cond);font-size:16px">' + turboTxt + '</b></div></div>';
   h += '<div class="card"><h3>Jízda <button class="btn small ghost" id="btnNewTrip">Nová jízda</button></h3>' + kvRows([
     ['Ujeto', T ? fmt(T.km, 1) + ' km' : '–'], ['Doba', T ? durTxt(T.last - T.start) : '–'],

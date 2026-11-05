@@ -40,6 +40,7 @@ function v2root(v){
 function obdPlan(){
   let ids;
   if (curView === 'tests' && TST.cur) ids = TST.cur.obdIds ? TST.cur.obdIds() : ['rpm', 'cool'];
+  else if (PIP.on) ids = PIP.vals;
   else if (D.focus) ids = [D.focus.id];
   else if (D.hud) ids = D.hud.vals;
   else if (curView === 'drive' && PAGES[curPage].layout === 'health') ids = ['boost', 'cool', 'volt', 'load', 'iat'];
@@ -58,6 +59,7 @@ function currentPlan(){
   if (SCAN.on) { const rest = SCAN.list.filter(g => !SCAN.got[g]); if (rest.length) return rest; }
   if (curView === 'more' && moreSub === 'groups') { const p = groupsPlan(); if (p) return p; }
   if (curView === 'tests' && TST.cur) { const req = TST.cur.need(); if (req.length) return buildPlan(groupsFor([], req)); }
+  if (PIP.on) return buildPlan(groupsFor(PIP.vals));
   if (D.focus) return buildPlan(groupsFor([D.focus.id]));
   if (curView === 'drive' && PAGES[curPage].layout === 'health' && !D.hud) return buildPlan(groupsFor(['boost', 'maf', 'cool', 'volt']));
   if (D.hud) return buildPlan(groupsFor(D.hud.vals));
@@ -116,13 +118,14 @@ function openGuide(){
 function closeGuide(){ $('guide').hidden = true; if (!CFG.onboarded) { CFG.onboarded = true; saveCfg(); } }
 
 /* ---------- banner: one line, most important first ---------- */
-let bannerTop = null;
+let bannerTop = null, bannerItems = [];
 $('banner').onclick = () => { if (bannerTop && bannerTop.tap) bannerTop.tap(); };
 function renderBanner(){
   const items = activeAlerts().concat(engineBanners());
   if (S.identCyl && S.identCyl !== PROFILE.cyl && !R.on) items.push({ lvl: 'warn', txt: 'Jiné auto než vybrané', info: 'klepni', tap: openPicker });
   const rank = { bad: 0, warn: 1, done: 2, info: 3 };
   items.sort((a, b) => rank[a.lvl] - rank[b.lvl]);
+  bannerItems = items;
   const b = $('banner');
   if (!items.length) { bannerTop = null; if (!b.hidden) { b.hidden = true; b.dataset.h = ''; } return; }
   const top = items[0]; bannerTop = top;
@@ -240,6 +243,8 @@ let lastTick = performance.now(), tickN = 0, recT = null;
 setInterval(() => {
   const t = performance.now(), dt = Math.min(5, (t - lastTick) / 1000); lastTick = t; tickN++;
   sampleValues(); sample(); renderBanner(); shiftCheck(); tripTick(dt); engineTick(dt);
+  if (PIP.on) { pipUpdate(); }
+  if (tickN % 4 === 0) pipSync();
   if (curView === 'charts') drawCharts();
   unitWatch(); scanTick();
   if (curView === 'tests' && TST.cur) updateTest();

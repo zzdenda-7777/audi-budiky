@@ -211,6 +211,8 @@ function renderSettings(){
     '<div class="lbl2">Připojení</div><div class="card">' +
     (isObd() ? '<div class="switch"><span class="sw-t">Adaptér OBD<small>' + esc(CFG.btName ? CFG.btName + ' · ' + CFG.btAddr : 'nevybraný') + '</small></span><button class="btn small" id="sBt">Změnit</button></div>'
       : togRow('sClu', 'Číst panel při připojení', 'palivo, km, venkovní teplota – jen jednou, pak už běží jen motor', CFG.cluster)) +
+    (pipSupported() ? togRow('sPip', 'Plovoucí okno', 'po HOME se diagnostika zmenší do okna nad YouTube, mapy…', CFG.pip) +
+      '<div class="switch"><span class="sw-t">Zmenšit do okna teď<small>4 hodnoty ze stránky, kde jsi byl · klepnutím na okno ho zvětšíš</small></span><button class="btn small" id="sPipNow">Zmenšit</button></div>' : '') +
     togRow('sGps', 'GPS', isObd() ? 'rychlost, km, l/100 km, zrychlení' : 'rychlost, km, l/100 km, zrychlení, dyno', CFG.gps) +
     togRow('sRec', 'Nahrávat jízdu automaticky', 'CSV do Stažených souborů', CFG.autoRec) + '</div>' +
     '<div class="lbl2">Data</div><div class="card"><p>Historie (jízdy, testy, poslední hodnoty) je uložená v telefonu a přežije restart i aktualizaci aplikace.</p>' +
@@ -222,6 +224,8 @@ function renderSettings(){
   if ($('sMass')) $('sMass').onchange = e => { const v = parseFloat(String(e.target.value).replace(',', '.')); if (isFinite(v) && v >= 500 && v <= 4000) { CFG.massBy = CFG.massBy || {}; CFG.massBy[PROFILE.id] = v; saveCfg(); } else e.target.value = carMass(); }; num('sPrice', 'price', 1, 200); num('sShift', 'shiftRpm', 1500, 6000);
   if ($('sClu')) $('sClu').onclick = () => { CFG.cluster = !CFG.cluster; saveCfg(); A && A.setClusterOnConnect && A.setClusterOnConnect(CFG.cluster); renderSettings(); };
   if ($('sBt')) $('sBt').onclick = openBtPicker;
+  if ($('sPip')) $('sPip').onclick = () => { CFG.pip = !CFG.pip; saveCfg(); pipSync(); renderSettings(); };
+  if ($('sPipNow')) $('sPipNow').onclick = () => { showView('drive'); setTimeout(() => { try { A.enterPip(); } catch (_) {} }, 150); };
   $('sGps').onclick = () => { CFG.gps = !CFG.gps; saveCfg(); if (A) { if (CFG.gps) A.gpsStart && A.gpsStart(); else { A.gpsStop && A.gpsStop(); S.gpsV = null; } } renderSettings(); };
   $('sRec').onclick = () => { CFG.autoRec = !CFG.autoRec; saveCfg(); renderSettings(); };
   $('sDelAll').onclick = () => {

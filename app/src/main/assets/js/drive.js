@@ -8,7 +8,7 @@ const PAGES_DEF = [
   { name: 'Stav', layout: 'health', vals: [] },
   { name: 'Turbo', layout: 'dial', vals: ['boost', 'rpm', 'iq', 'maf', 'n75'] },
   { name: 'Eko', layout: 'grid', vals: ['cons', 'avg', 'cost', 'range', 'spd', 'dist'] },
-  { name: 'Teploty', layout: 'grid', vals: ['cool', 'fuelT', 'iat', 'outT', 'volt', 'rpm'] }
+  { name: 'Teploty', layout: 'grid', vals: ['cool', 'oilT', 'fuelT', 'iat', 'outT', 'volt'] }
 ];
 /* Peugeot (OBD): no injection quantity, timing or N75 – pages built from what standard OBD offers */
 const PAGES_DEF_OBD = [
@@ -42,10 +42,21 @@ function validPages(p){
   }
   return out;
 }
+/* oil temperature came later: put it on a saved "Teploty" page once (in place of the revs, or at the end) */
+function migrateOil(key){
+  if (KV.get('mig.oil.' + key, false)) return;
+  const pg = KV.get(key, null);
+  if (Array.isArray(pg)) {
+    const t = pg.find(p => p && p.name === 'Teploty' && Array.isArray(p.vals) && !p.vals.includes('oilT'));
+    if (t) { const i = t.vals.indexOf('rpm'); if (i >= 0) t.vals.splice(i, 1); t.vals.splice(1, 0, 'oilT'); t.vals = t.vals.slice(0, 6); KV.set(key, pg); }
+  }
+  KV.set('mig.oil.' + key, true);
+}
+migrateOil(pagesKey());
 let PAGES = validPages(KV.get(pagesKey(), null));
 const savePages = () => KV.set(pagesKey(), PAGES);
 /* switching between the Audis and the Peugeot swaps the page set */
-function reloadPages(){ PAGES = validPages(KV.get(pagesKey(), null)); curPage = Math.max(0, Math.min(NPAGES - 1, curPage)); if (typeof renderPageChips === 'function' && $('pageChips')) { renderPageChips(); buildPage(); } }
+function reloadPages(){ migrateOil(pagesKey()); PAGES = validPages(KV.get(pagesKey(), null)); curPage = Math.max(0, Math.min(NPAGES - 1, curPage)); if (typeof renderPageChips === 'function' && $('pageChips')) { renderPageChips(); buildPage(); } }
 let curPage = Math.max(0, Math.min(NPAGES - 1, CFG.page | 0));
 
 const D = { slots: [], disp: {}, peak: {}, mm: {}, focus: null, hud: false, lastSlow: 0, lastT: 0 };

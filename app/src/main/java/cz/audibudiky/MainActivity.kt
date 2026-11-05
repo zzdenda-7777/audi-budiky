@@ -14,6 +14,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
+import android.content.res.Configuration
 import android.hardware.usb.UsbDeviceConnection
 import android.hardware.usb.UsbEndpoint
 import android.hardware.usb.UsbManager
@@ -276,6 +277,37 @@ class MainActivity : Activity() {
         if (pageReady) js("onAppPause", "0")
     }
 
+    /* ---------- floating window (picture-in-picture) ----------
+       While connected, HOME shrinks the app into a small window over other apps; the connection keeps running.
+       Android 12+ does it by itself (auto-enter), older versions get it from onUserLeaveHint. */
+    @Volatile private var pipWanted = false
+    private fun pipAvailable(): Boolean = Build.VERSION.SDK_INT >= 26 &&
+        try { packageManager.hasSystemFeature(PackageManager.FEATURE_PICTURE_IN_PICTURE) } catch (_: Exception) { false }
+    private fun pipParams(): android.app.PictureInPictureParams? {
+        if (Build.VERSION.SDK_INT < 26) return null
+        val b = android.app.PictureInPictureParams.Builder().setAspectRatio(android.util.Rational(4, 3))
+        if (Build.VERSION.SDK_INT >= 31) { b.setAutoEnterEnabled(pipWanted); b.setSeamlessResizeEnabled(false) }
+        return b.build()
+    }
+    private fun pipUpdate() {
+        if (Build.VERSION.SDK_INT < 26 || !pipAvailable()) return
+        try { pipParams()?.let { setPictureInPictureParams(it) } } catch (_: Exception) { }
+    }
+    private fun pipEnter() {
+        if (Build.VERSION.SDK_INT < 26 || !pipAvailable()) return
+        try { pipParams()?.let { enterPictureInPictureMode(it) } } catch (e: Exception) { js("showToast", JSONObject.quote("Plovoucí okno nejde: " + (e.message ?: "telefon ho nepovolil"))) }
+    }
+
+    override fun onUserLeaveHint() {
+        super.onUserLeaveHint()
+        if (pipWanted && Build.VERSION.SDK_INT in 26..30) pipEnter()
+    }
+
+    override fun onPictureInPictureModeChanged(isInPictureInPictureMode: Boolean, newConfig: Configuration) {
+        super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
+        if (pageReady) js("onPip", if (isInPictureInPictureMode) "true" else "false")
+    }
+
     @Deprecated("Deprecated in Java")
     override fun onBackPressed() {
         if (!pageReady) { defaultBack(); return }
@@ -375,6 +407,15 @@ class MainActivity : Activity() {
 
         @JavascriptInterface
         fun obdProbe() { probeReq = true }
+
+        @JavascriptInterface
+        fun pipSupported(): Boolean = pipAvailable()
+
+        @JavascriptInterface
+        fun setPip(on: Boolean) { pipWanted = on && pipAvailable(); main.post { pipUpdate() } }
+
+        @JavascriptInterface
+        fun enterPip() { main.post { pipEnter() } }
 
         /** Reads measuring groups of another unit for a few seconds, then goes back to the engine. Read-only. */
         @JavascriptInterface

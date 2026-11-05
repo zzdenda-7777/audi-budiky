@@ -63,7 +63,7 @@ const CFG_DEF = {
   snd: { shift: true, turbo: true, temp: true, volt: true, smoke: false, warm: true, cool: true, timing: true, conn: true, drive: true },
   lim: { coolWarn: 110, oilWarn: 135, fuelTWarn: 85, voltLow: 12.8, fuelLow: 10 },
   shiftRpm: 4000, mass: 1450, price: 36.5,
-  cluster: true, gps: true, autoRec: false,
+  cluster: true, gps: true, autoRec: false, pip: true,
   span: 60, accMode: '0-100', page: 0, theme: 'moro', nightAuto: true, nightDim: true, lastPos: null, onboarded: false, profile: 'a4v6', massBy: {}
 };
 const CFG = Object.assign(clone(CFG_DEF), KV.get('cfg', {}));
@@ -173,6 +173,31 @@ function ingest(e, g, f){
   if (typeof healthIngest === 'function') healthIngest(e, g);
 }
 
+/* ---------------- oil temperature ----------------
+   Real where the car has it (A4 B6 panel group 003, or OBD PID 5C). Otherwise – and between two real readings,
+   since the panel is read only when connecting – a model: the oil follows the coolant with a lag of ~7 minutes
+   (it warms up slower than the water) and settles above it under load (≈ water − 4 °C at idle, +25 °C at full
+   load, a bit more at high revs). Shown as "odhad", never used for the overheating alarm. */
+const OILM = { v: null, t: 0, anchorT: 0 };
+const oilReal = () => fresh('oilT', isObd() ? 10000 : 30000);
+function oilTick(){
+  const now = Date.now(), dt = OILM.t ? Math.min(5, (now - OILM.t) / 1000) : 0; OILM.t = now;
+  if (M.oilT && M.oilT.t > OILM.anchorT && M.oilT.v != null) { OILM.v = M.oilT.v; OILM.anchorT = M.oilT.t; return; }
+  const cool = fresh('cool', 15000); if (cool == null) return;
+  if (OILM.v == null) OILM.v = cool;                       // first reading: the oil starts where the water is
+  const rpm = fresh('rpm', 5000), running = rpm != null && rpm > 300;
+  let L = 0;
+  if (running) {
+    const ld = fresh('load', 4000), iq = fresh('iq', 4000), full = (PROFILE.iqFull && PROFILE.iqFull[1]) || 45;
+    L = isObd() ? (ld != null ? ld / 100 : 0.2) : (iq != null ? iq / full : 0.2);
+    L = Math.max(0, Math.min(1, L));
+  }
+  const eq = running ? cool - 4 + 25 * L + Math.max(0, rpm - 3000) / 1000 * 4 : cool;
+  OILM.v += (eq - OILM.v) * Math.min(1, dt / (running ? 420 : 900));
+}
+const oilSrc = () => oilReal() != null ? 'real' : OILM.v == null ? 'none' : OILM.anchorT ? 'anchor' : 'est';
+const oilNow = () => { const r = oilReal(); return r != null ? r : OILM.v; };
+
 /* ---------------- derived values ---------------- */
 const boostRel = () => { const a = fresh('boostAbs', 3000); return a == null ? null : (a - S.base) / 1000; };
 const boostSpecRel = () => { const a = fresh('boostSpecAbs', 3000); return a == null ? null : (a - S.base) / 1000; };
@@ -235,8 +260,9 @@ const VAL = [
   { id:'iat', name:'Sání', unit:'°C', d:0, cat:'temp', need:[[7]], pid:[0x0F], get:() => fresh('iat', 10000), range:[-20, 80], step:20, warn:v => v > 60 },
   { id:'outT', name:'Venku', unit:'°C', d:0, cat:'temp', need:[], clu:true, pid:[0x46], get:() => any('outT'),
     sub:() => (any('outT') != null && any('outT') <= 3) ? 'pozor, náledí' : isObd() ? 'z auta' : (S.cluRead ? 'z panelu' : 'načte se z panelu'), range:[-20, 40], step:10, warn:v => v <= 3 },
-  { id:'oilT', name:'Olej', unit:'°C', d:0, cat:'temp', need:[], clu:true, pid:[0x5C], get:() => any('oilT'),
-    sub:() => (S.cluRead && !S.cluHasOil) ? 'panel ji nehlásí' : 'z panelu', range:[40, 150], step:30, warn:v => v > 125, bad:v => v > 140 },
+  { id:'oilT', name:'Olej', unit:'°C', d:0, cat:'temp', need:[], obd:true, pid:[0x5C], get:() => oilNow(), get est(){ return oilSrc() !== 'real'; },
+    sub:() => ({ real: isObd() ? 'z auta' : 'z panelu', anchor: 'odhad, měřeno před ' + Math.max(1, Math.round((Date.now() - OILM.anchorT) / 60000)) + ' min', est: 'z vody a zatížení', none: 'čeká na teplotu vody' })[oilSrc()],
+    range:[20, 150], step:30, warn:v => v > 125, bad:v => v > 140 },
   { id:'spd', name:'Rychlost', unit:'km/h', d:0, cat:'jizda', need:[], gps:true, obd:true, pid:[0x0D], get:speed, sub:() => speed() == null ? gpsHint() : gpsSpeed() != null ? 'GPS' : 'z auta', range:[0, 200], step:50 },
   { id:'cons', name:'Spotřeba', unit:'l/100', d:1, cat:'jizda', est:true, need:[[1]], gps:true, pid:[0x5E, 0x04],
     get:() => { const v = l100(); return v != null ? v : lph(); }, unitNow:() => l100() != null ? 'l/100' : 'l/h',
@@ -399,7 +425,7 @@ const ALERTS = [
   { id:'under', say:() => 'Turbo nedotahuje tlak', lvl:'warn', snd:'turbo', txt:'Nedotlak turba', hold:1500, test:() => { const b = boostRel(), s = boostSpecRel(), rpm = fresh('rpm', 3000) || 0; return b != null && s != null && rpm > 2000 && s > 0.5 && s - b > 0.25; }, info:() => fmt(boostRel() - boostSpecRel(), 2) + ' bar' },
   { id:'cool2', say:() => 'Motor se přehřívá, voda má ' + deg(any('cool')), lvl:'bad', snd:'temp', txt:'Přehřívání motoru', hold:1000, test:() => (fresh('cool', 10000) || 0) > 115, info:() => fmt(any('cool'), 0) + ' °C' },
   { id:'cool', say:() => 'Voda je moc horká, ' + deg(any('cool')), lvl:'warn', snd:'temp', txt:'Vysoká teplota vody', hold:2000, test:() => (fresh('cool', 10000) || 0) > CFG.lim.coolWarn, info:() => fmt(any('cool'), 0) + ' °C' },
-  { id:'oil', say:() => 'Olej je moc horký, ' + deg(any('oilT')), lvl:'bad', snd:'temp', txt:'Vysoká teplota oleje', hold:1000, test:() => (any('oilT') || 0) > CFG.lim.oilWarn, info:() => fmt(any('oilT'), 0) + ' °C' },
+  { id:'oil', say:() => 'Olej je moc horký, ' + deg(any('oilT')), lvl:'bad', snd:'temp', txt:'Vysoká teplota oleje', hold:1000, test:() => (oilReal() || 0) > CFG.lim.oilWarn, info:() => fmt(any('oilT'), 0) + ' °C' },
   { id:'fuel', say:() => 'Palivo je horké, ' + deg(any('fuelT')), lvl:'warn', snd:'temp', txt:'Horké palivo', hold:3000, test:() => (fresh('fuelT', 10000) || 0) > CFG.lim.fuelTWarn, info:() => fmt(any('fuelT'), 0) + ' °C' },
   { id:'lowfuel', say:() => 'Dochází nafta, zbývá asi ' + litres(fuelLeft()), lvl:'warn', snd:'drive', txt:'Dochází nafta', hold:4000, test:() => { const l = fuelLeft(); return l != null && l < CFG.lim.fuelLow; }, info:() => fmt(fuelLeft(), 0) + ' l' },
   { id:'ice', say:() => { const o = any('outT'), a = Math.abs(Math.round(o)); return 'Venku ' + (a >= 2 && a <= 4 ? 'jsou ' : 'je ') + deg(o) + ', pozor na náledí'; }, lvl:'warn', snd:'drive', txt:'Náledí', hold:3000, test:() => { const o = any('outT'); return o != null && o <= 3; }, info:() => fmt(any('outT'), 0) + ' °C' },
