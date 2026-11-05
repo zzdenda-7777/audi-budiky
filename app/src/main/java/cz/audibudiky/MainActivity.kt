@@ -1089,11 +1089,29 @@ class MainActivity : Activity() {
                 if (faults) {
                     emitFaults(0x17, k.readFaults())
                 } else {
-                    for (g in intArrayOf(1, 2, 3)) {
+                    /* Groups 1–3: speed, km, fuel, outside, coolant, oil temperature. The first time a panel is seen,
+                       groups 1–16 are read once to find where it reports more – e.g. the oil level in mm from the
+                       sender in the sump (A4 B6 2.5 TDI) – and those groups are then read every time. */
+                    val key = "cluGroups." + ident.joinToString(" ").replace(Regex("\\s+"), " ").trim().take(40)
+                    val saved = prefs.getString(key, null)
+                    val groups = if (saved == null) (1..16).toList() else listOf(1, 2, 3) + saved.split(',').mapNotNull { it.trim().toIntOrNull() }
+                    if (saved == null) trace("[panel] první čtení tohoto panelu: projdu skupiny 1–16")
+                    val extra = ArrayList<Int>()
+                    var naRun = 0
+                    for (g in groups) {
+                        if (!running) break
                         val t0 = SystemClock.elapsedRealtime()
                         val f = k.readGroup(g)
                         if (f != null) recorder.write(0x17, g, f)
                         emit(0x17, g, f, SystemClock.elapsedRealtime() - t0)
+                        if (f != null) trace("[panel] skupina %03d: %s".format(g, f.joinToString(" | ") { x -> (if (x.value != null) "%.1f".format(x.value) else x.text) + " " + x.unit + " (${x.type}/${x.a}/${x.b})" }))
+                        if (f == null) naRun++ else naRun = 0
+                        if (g > 3 && f != null && f.any { it.unit == "mm" }) extra.add(g)
+                        if (saved == null && g > 3 && naRun >= 4) break   // the panel has no more groups
+                    }
+                    if (saved == null && running) {
+                        prefs.edit().putString(key, extra.joinToString(",")).apply()
+                        trace("[panel] průzkum hotový" + (if (extra.isEmpty()) ", hladina oleje v mm mimo skupiny 1–3 není" else ", hladina oleje ve skupině ${extra.joinToString()}"))
                     }
                 }
                 k.end()

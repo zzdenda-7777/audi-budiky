@@ -11,7 +11,8 @@ const HICON = {
   test: '<path d="M9 3h6M10 3v6.5L5 18a2 2 0 0 0 1.7 3h10.6A2 2 0 0 0 19 18l-5-8.5V3"/><path d="M7.5 15h9"/>',
   flt: '<path d="M12 3.5 21.5 20h-19z"/><path d="M12 10v4.5M12 17.2v.3"/>',
   fill: '<path d="M5 21V5a2 2 0 0 1 2-2h5a2 2 0 0 1 2 2v16M3.5 21h12M14 9h1.5a2 2 0 0 1 2 2v5.5a1.5 1.5 0 0 0 3 0V8.5L18 6"/><path d="M7 8h5"/>',
-  acc: '<circle cx="12" cy="13.5" r="7.5"/><path d="M12 9.5v4l2.8 1.8M9.5 2.8h5"/>'
+  acc: '<circle cx="12" cy="13.5" r="7.5"/><path d="M12 9.5v4l2.8 1.8M9.5 2.8h5"/>',
+  oil: '<path d="M12 3.2c3.2 4.4 6 7.5 6 11a6 6 0 0 1-12 0c0-3.5 2.8-6.6 6-11z"/><path d="M9 14.5a3 3 0 0 0 3 3"/>'
 };
 const hico = (k, cls) => '<span class="hico ' + (cls || 'h-' + k) + '"><svg viewBox="0 0 24 24">' + HICON[k] + '</svg></span>';
 
@@ -40,6 +41,7 @@ function histEvents(c){
   const prev = {};
   (c.faultLog || []).forEach(f => { ev.push({ k: 'fl' + f.t + f.u, type: 'flt', t: f.t, f, prev: prev[f.u] || null }); prev[f.u] = f; });
   (c.fuelLog || []).forEach(x => ev.push({ k: 'fu' + x.t, type: 'fill', t: x.t, x }));
+  (c.oilLog || []).forEach((x, i, arr) => ev.push({ k: 'ol' + x.t, type: 'oil', t: x.t, x, prev: arr[i - 1] || null }));
   const accTests = (c.log || []).filter(r => r.id === 'acc').map(r => r.t);
   Object.keys(c.acc || {}).forEach(m => (c.acc[m].last || []).forEach(x => {
     if (accTests.some(t => Math.abs(t - x.t) < 5000)) return;            // already there as a test run
@@ -63,6 +65,11 @@ function evHead(e, c){
     const f = e.f, n = f.list.length, pk = e.prev ? new Set(e.prev.list.map(fCode)) : null, nw = pk ? f.list.filter(x => !pk.has(fCode(x))).length : 0;
     return { ico: hico('flt', n ? 'h-bad' : 'h-ok'), title: 'Chyby – ' + unitTxt(f.u).toLowerCase() + ': ' + (n ? n + (n === 1 ? ' chyba' : n <= 4 ? ' chyby' : ' chyb') : 'žádné ✓'),
       sub: n ? f.list.slice(0, 4).map(fCode).join(', ') + (n > 4 ? ' …' : '') + (nw && pk ? ' · nové: ' + nw : '') : (e.prev && e.prev.list.length ? 'od minula zmizelo ' + e.prev.list.length : 'paměť čistá') };
+  }
+  if (e.type === 'oil') {
+    const x = e.x, d = e.prev ? x.v - e.prev.v : null;
+    return { ico: hico('oil', d != null && d <= -3 ? 'h-bad' : 'h-oil'), title: 'Hladina oleje · ' + fmt(x.v, 0) + ' mm',
+      sub: (d == null ? 'první měření' : Math.abs(d) < 0.5 ? 'stejně jako minule' : (d > 0 ? '+' : '−') + fmt(Math.abs(d), 0) + ' mm od ' + dateTxt(e.prev.t)) + (x.oilT != null ? ' · olej ' + x.oilT + ' °C' : '') };
   }
   if (e.type === 'fill') {
     const x = e.x;
@@ -116,6 +123,11 @@ function evBody(e, c){
     if (f.odo != null) extra.push(['Stav km', fmt(f.odo, 0)]);
     return h + kvRows(extra);
   }
+  if (e.type === 'oil') {
+    const x = e.x;
+    return kvRows([['Kdy', dtShort(x.t)], ['Hladina', fmt(x.v, 1) + ' mm'], ['Předtím', e.prev ? fmt(e.prev.v, 1) + ' mm (' + dtShort(e.prev.t) + ')' : '–'], ['Teplota oleje', x.oilT != null ? x.oilT + ' °C' : '–'], ['Voda', x.cool != null ? x.cool + ' °C' : '–'], ['Stav km', x.odo != null ? fmt(x.odo, 0) : '–']]) +
+      '<p class="note" style="margin:8px 0 0">Porovnávej měření za podobných podmínek (na rovině, podobná teplota). Pokles o pár mm po studeném startu je normální.</p>';
+  }
   if (e.type === 'fill') {
     const x = e.x;
     return kvRows([['Kdy', dtShort(x.t)], ['Litrů', fmt(x.l, 1)], ['Před tím ≈', x.before != null ? fmt(x.before, 1) + ' l' : '–'], ['Cena ≈', x.mode !== 'set' && x.price ? fmt(x.l * x.price, 0) + ' Kč' : '–'],
@@ -145,6 +157,7 @@ function histHeader(c){
   const lr = lastReads(c), nowF = Object.values(lr).reduce((s, f) => s + f.list.length, 0);
   const rows = [['Naposledy', c.seen ? dtShort(c.seen) : '–'], ['Stav km', L.odoNow != null ? fmt(L.odoNow, 0) : L.odo != null ? fmt(L.odo, 0) : null],
     ['Palivo' + (obd ? ' ≈' : ''), L.fuelL != null ? fmt(L.fuelL, 0) + ' l' : null], ['Venku', L.outT != null ? fmt(L.outT, 0) + ' °C' : null],
+    ['Hladina oleje', (c.oilLog || []).length ? fmt(c.oilLog[c.oilLog.length - 1].v, 0) + ' mm' + oilLvlDelta(c) : null],
     ['Průměr', km > 0 ? fmt(fu / km * 100, 1) + ' l/100' : '–'], ['Najeto s aplikací', fmt(tr.reduce((s, t) => s + t.km, 0), 0) + ' km'],
     ['Jízd', String(tr.length)], ['Testů', String((c.log || []).length)],
     ['Chyby teď', Object.keys(lr).length ? (nowF ? '<span style="color:var(--bad)">' + nowF + '</span>' : '<span style="color:var(--ok)">žádné</span>') : 'nečteno'], ['Čtení chyb', String((c.faultLog || []).length)]];
@@ -284,6 +297,10 @@ function histText(c){
   (c.log || []).forEach(r => { L.push(new Date(r.t).toLocaleString('cs-CZ') + ' · ' + testName(r.id) + ' · ' + (r.grade && GRADES[r.grade] ? GRADES[r.grade][1] + ' ' + r.score + '/100' : (VERD[r.v] || VERD.none)[1]) + ' · ' + strip(r.sum));
     (r.rows || []).forEach(x => L.push('    ' + strip(x[0]) + ': ' + strip(x[1]))); });
   Object.keys(c.acc || {}).forEach(m => L.push('Zrychlení ' + m + ': nejlepší ' + fmt(c.acc[m].best, 2) + ' s, poslední ' + (c.acc[m].last || []).slice(0, 10).map(x => fmt(x.v, 2)).join(', ')));
+  if ((c.oilLog || []).length) {
+    L.push('', '== HLADINA OLEJE ==');
+    c.oilLog.forEach(x => L.push(new Date(x.t).toLocaleString('cs-CZ') + ' · ' + fmt(x.v, 1) + ' mm' + (x.oilT != null ? ' · olej ' + x.oilT + ' °C' : '') + (x.cool != null ? ' · voda ' + x.cool + ' °C' : '') + (x.odo != null ? ' · ' + fmt(x.odo, 0) + ' km' : '')));
+  }
   if ((c.fuelLog || []).length) {
     L.push('', '== TANKOVÁNÍ ==');
     c.fuelLog.forEach(x => L.push(new Date(x.t).toLocaleString('cs-CZ') + ' · ' + ({ full: 'do plna', part: 'část', set: 'stav nádrže' })[x.mode] + ' ' + fmt(x.l, 1) + ' l' + (x.before != null ? ', před tím ≈ ' + fmt(x.before, 1) + ' l' : '')));

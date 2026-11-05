@@ -519,3 +519,4 @@ body.pip{overflow:hidden}
 .pt.nodata .pv{color:var(--faint)}
 .pips{font-size:7vh;color:var(--muted);text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .pips[hidden]{display:none}
+.h-oil{color:var(--warn)}

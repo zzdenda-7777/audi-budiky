@@ -33,13 +33,26 @@ function onCarIdent(ident){
   const cy = /\b[RV]\s?(\d{1,2})\b/.exec(ident || ''); const cyl = cy ? +cy[1] : 0;
   c.profile = (cyl && PROFILE.cyl !== cyl) ? (Object.values(PROFILES).find(p => p.cyl === cyl) || PROFILE).id : PROFILE.id;
   saveHist();
+  if (S.cluRead) onCarCluster();          // the panel is read before the engine: file it under this car now
   startOrContinueTrip();
+}
+/* change against the reading before, e.g. " (−3 mm od 2. 11.)" */
+function oilLvlDelta(c){
+  c = c || (CAR && HIST.cars[CAR]); const L = c && c.oilLog; if (!L || L.length < 2) return '';
+  const a = L[L.length - 1], b = L[L.length - 2], d = a.v - b.v;
+  return ' (' + (Math.abs(d) < 0.5 ? 'stejně jako ' : (d > 0 ? '+' : '−') + fmt(Math.abs(d), 0) + ' mm od ') + dateTxt(b.t) + ')';
 }
 function onCarCluster(){
   if (!CAR) return;
   const c = carObj(CAR);
+  if (c.clu && S.cluIdent && c.clu !== S.cluIdent) return;   // a panel of another car (switched cars, engine not connected yet)
   if (S.cluIdent) c.clu = S.cluIdent;
-  ['odo', 'fuelL', 'outT', 'oilT'].forEach(k => { if (any(k) != null) c.last[k] = any(k); });
+  ['odo', 'fuelL', 'outT', 'oilT', 'oilLvl'].forEach(k => { if (any(k) != null) c.last[k] = any(k); });
+  /* every oil level reading is kept, so a slow loss shows up over weeks */
+  if (M.oilLvl && M.oilLvl.v != null && M.oilLvl.t !== S.oilLvlLogged) {
+    S.oilLvlLogged = M.oilLvl.t;                                  // M times are the app's clock, the log keeps real dates
+    c.oilLog = (c.oilLog || []).concat([{ t: Date.now() - Math.max(0, clock() - M.oilLvl.t), v: +M.oilLvl.v.toFixed(1), oilT: any('oilT') != null ? Math.round(any('oilT')) : null, cool: any('coolClu') != null ? Math.round(any('coolClu')) : null, odo: any('odo') }]).slice(-300);
+  }
   c.last.t = Date.now(); saveHist();
 }
 function saveTest(id, res){
@@ -226,7 +239,7 @@ function renderTripView(full){
     ['Max vstřik', T ? fmt(T.maxIq, 1) + ' mg' : '–'], ['Nejbohatší směs', T && T.minAfr != null ? fmt(T.minAfr, 1) + ':1' : '–']
   ]) + (speed() == null ? '<p class="note" style="margin:8px 0 0">Kilometry a l/100 km se počítají z GPS – zapni ji ve Více → Nastavení.</p>' : '') + '</div>';
   h += '<div class="card"><h3>Přístrojový panel <button class="btn small" id="btnClu"' + (S.state === 'live' ? '' : ' disabled') + '>Načíst znovu</button></h3>' + kvRows([
-    ['Venku', fmt(any('outT'), 0) + ' °C'], ['Palivo (panel)', fmt(any('fuelL'), 0) + ' l'], ['Stav km', fmt(any('odo'), 0)], ['Olej', S.cluHasOil ? fmt(any('oilT'), 0) + ' °C' : 'nehlásí']
+    ['Venku', fmt(any('outT'), 0) + ' °C'], ['Palivo (panel)', fmt(any('fuelL'), 0) + ' l'], ['Stav km', fmt(any('odo'), 0)], ['Olej', S.cluHasOil ? fmt(any('oilT'), 0) + ' °C' : 'nehlásí'], ['Hladina oleje', S.cluHasLvl ? fmt(any('oilLvl'), 0) + ' mm' + oilLvlDelta() : 'nehlásí']
   ]) + '<p class="note" style="margin:8px 0 0">Panel se čte jen při připojení – motor pak běží živě bez přerušení. „Načíst znovu“ motor přeruší asi na 5 s.</p></div>';
   h += factsCardHTML();
   $('tripBody').innerHTML = h;

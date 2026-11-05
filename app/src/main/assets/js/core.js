@@ -168,6 +168,11 @@ function ingest(e, g, f){
       if (oil == null) { const t = f.map((x, i) => ({ x, i })).filter(o => o.x.t === 5 && o.i > 0 && o.x.v > -40 && o.x.v < 170); if (t.length) oil = t[0].x.v; }
       if (oil != null) { S.cluHasOil = true; setM('oilT', oil, src); }
     }
+    /* any panel field in mm is the oil level from the sender in the sump (A4 B6 2.5 TDI); every group is kept for the report */
+    f.forEach(x => { if (x.u === 'mm' && x.v != null && x.v > -50 && x.v < 300) { S.cluHasLvl = true; setM('oilLvl', x.v, src); } });
+    S.cluRaw = S.cluRaw || {}; S.cluRaw[g] = f.map(x => [x.t, x.a, x.b, x.v, x.u, x.s]);
+    KV.set('clu.raw', { t: Date.now(), ident: S.cluIdent || '', g: S.cluRaw });
+    if (typeof onCarCluster === 'function') onCarCluster();
   }
   else if (typeof onUnitData === 'function') onUnitData(e, g, f);   // other units (ABS…), read on request by a test
   if (typeof healthIngest === 'function') healthIngest(e, g);
@@ -261,8 +266,10 @@ const VAL = [
   { id:'outT', name:'Venku', unit:'°C', d:0, cat:'temp', need:[], clu:true, pid:[0x46], get:() => any('outT'),
     sub:() => (any('outT') != null && any('outT') <= 3) ? 'pozor, náledí' : isObd() ? 'z auta' : (S.cluRead ? 'z panelu' : 'načte se z panelu'), range:[-20, 40], step:10, warn:v => v <= 3 },
   { id:'oilT', name:'Olej', unit:'°C', d:0, cat:'temp', need:[], obd:true, pid:[0x5C], get:() => oilNow(), get est(){ return oilSrc() !== 'real'; },
-    sub:() => ({ real: isObd() ? 'z auta' : 'z panelu', anchor: 'odhad, měřeno před ' + Math.max(1, Math.round((Date.now() - OILM.anchorT) / 60000)) + ' min', est: 'z vody a zatížení', none: 'čeká na teplotu vody' })[oilSrc()],
+    sub:() => ({ real: isObd() ? 'z auta' : 'z panelu', anchor: 'odhad, měřeno před ' + Math.max(1, Math.round((clock() - OILM.anchorT) / 60000)) + ' min', est: 'z vody a zatížení', none: 'čeká na teplotu vody' })[oilSrc()],
     range:[20, 150], step:30, warn:v => v > 125, bad:v => v > 140 },
+  { id:'oilLvl', name:'Hladina oleje', unit:'mm', d:0, cat:'motor', need:[], clu:true, avail:() => !S.cluRead || !!S.cluHasLvl, get:() => any('oilLvl'),
+    sub:() => S.cluHasLvl ? 'z panelu, ' + (M.oilLvl ? 'před ' + Math.max(1, Math.round((clock() - M.oilLvl.t) / 60000)) + ' min' : '') : 'načte se z panelu', range:[0, 100], step:20 },
   { id:'spd', name:'Rychlost', unit:'km/h', d:0, cat:'jizda', need:[], gps:true, obd:true, pid:[0x0D], get:speed, sub:() => speed() == null ? gpsHint() : gpsSpeed() != null ? 'GPS' : 'z auta', range:[0, 200], step:50 },
   { id:'cons', name:'Spotřeba', unit:'l/100', d:1, cat:'jizda', est:true, need:[[1]], gps:true, pid:[0x5E, 0x04],
     get:() => { const v = l100(); return v != null ? v : lph(); }, unitNow:() => l100() != null ? 'l/100' : 'l/h',
@@ -294,6 +301,7 @@ const valAvailable = v => {
     return v.pid.some(p => p === 0x100 || ((!OBD.sup.size || OBD.sup.has(p)) && !((OBD.naN[p] || 0) >= 3)));
   }
   if (v.obdOnly) return false;
+  if (v.avail && !v.avail()) return false;
   return v.need.every(r => r.some(g => !S.unsup.has(g)));
 };
 /* is this value meaningful for the selected car at all (page editor lists only those) */

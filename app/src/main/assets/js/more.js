@@ -463,6 +463,12 @@ function buildReport(){
       'Spáleno s aplikací celkem ≈ ' + fmt(c.fuelUsed || 0, 1) + ' l, v nádrži ≈ ' + (fuelNow() != null ? fmt(fuelNow(), 1) + ' l' : 'neznámo'));
     (c.fuelLog || []).forEach(x => L.push(new Date(x.t).toLocaleString('cs-CZ') + ': ' + ({ full: 'do plna', part: 'část', set: 'stav' })[x.mode] + ' ' + fmt(x.l, 1) + ' l, před tím ≈ ' + (x.before != null ? fmt(x.before, 1) : '?') + ' l, spáleno celkem ' + fmt(x.used, 1) + ' l, ×' + fmt(x.k, 3)));
   }
+  if (!isObd()) {
+    const cr = KV.get('clu.raw', null);
+    L.push('', '== PŘÍSTROJOVÝ PANEL – SKUPINY ' + (cr ? '(' + new Date(cr.t).toLocaleString('cs-CZ') + ', ' + (cr.ident || '') + ')' : '(zatím nečteno)') + ' ==');
+    if (cr) Object.keys(cr.g).map(Number).sort((a, b) => a - b).forEach(g => L.push('%03d: '.replace('%03d', String(g).padStart(3, '0')) +
+      (cr.g[g].length ? cr.g[g].map(x => (x[3] != null ? fmt(x[3], 1) : (x[5] || '')) + ' ' + (x[4] || '') + ' [' + x[0] + '/' + x[1] + '/' + x[2] + ']').join(' | ') : 'není')));
+  }
   const sc0 = isObd() ? null : scanStored();
   if (!isObd()) L.push('', '== PRŮZKUM SKUPIN ' + (sc0 ? '(' + new Date(sc0.t).toLocaleString('cs-CZ') + ', nalezeno ' + sc0.found + ')' : '(zatím neproběhl)') + ' ==');
   if (sc0) Object.keys(sc0.groups).map(Number).sort((a, b) => a - b).forEach(g => { const f = sc0.groups[g];

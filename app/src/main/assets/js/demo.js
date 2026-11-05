@@ -53,7 +53,8 @@
     call('onClusterIdent', '4B0919880  C5-KOMBIINSTR. VDO D11');
     call('onGroup', { e: 0x17, g: 1, ms: 120, f: [F(7, car.speed, 'km/h'), F(1, car.rpm, 'ot/min'), F(37, null, '', 'OK')] });
     call('onGroup', { e: 0x17, g: 2, ms: 120, f: [F(36, 337019, 'km'), F(19, 41, 'l'), F(5, 6.5, '°C')] });
-    call('onGroup', { e: 0x17, g: 3, ms: 120, f: [F(5, car.cool, '°C')] });
+    /* the A4 B6 panel with the oil sender in the sump: coolant, oil level in mm, oil temperature */
+    call('onGroup', { e: 0x17, g: 3, ms: 120, f: window.__demoV6 ? [F(5, car.cool, '°C'), F(13, 54 - Math.round(Math.random() * 2), 'mm'), F(5, Math.max(15, car.cool - 12), '°C')] : [F(5, car.cool, '°C')] });
   }
   function loop(){
     if (!running) return;
